@@ -23,7 +23,7 @@ customers.
   install|uninstall|status`, `sapi start`/`stop` for the background service (launchd agent on
   macOS, systemd user unit with lingering on Linux), `sapi uninstall [--purge]`.
   `scripts/install.sh` verifies the SHA-256 (and the cosign signature when present) and installs
-  to `~/.local/bin` without root. `docs/vm-setup.md`. Install end-to-end workflow on Ubuntu.
+  to `~/.local/bin` without root. `docs/vm-setup.md`.
 - Security suite in `test/security/` and contract tests with openai-node, openai-python and
   LangChain. `scripts/e2e/real-claude.ts` runs the same SDKs against a real signed-in subscription.
 

@@ -8,13 +8,12 @@ Date: 2026-11-27. Branch: `phase-2-setup`.
 |---|---|---|
 | `sapi setup`, guided or `--yes`: machine checks (refuses root), Claude CLI found or installed, sign-in hand-off, config written once, a self-test through HTTP, the first key, the background service | `src/setup/setup.ts` | `test/security/setup.test.ts` |
 | Machine detection: OS, CPU, SSH or desktop, container, WSL, systemd user manager or launchd, lingering, port state | `src/setup/machine.ts` | `test/unit/setup.test.ts` |
-| Background service: launchd agent (`local.sapi.gateway`) and systemd user unit (`sapi.service`) with lingering; `sapi service install\|uninstall\|status`, `sapi start` and `stop` drive it | `src/setup/service.ts` | `test/unit/setup.test.ts`, `.github/workflows/e2e-install.yml` |
+| Background service: launchd agent (`local.sapi.gateway`) and systemd user unit (`sapi.service`) with lingering; `sapi service install\|uninstall\|status`, `sapi start` and `stop` drive it | `src/setup/service.ts` | `test/unit/setup.test.ts` |
 | `sapi doctor` (`--json`, `--offline`): files and permissions, log chain, keys and key age, kill switches, service and port, sandbox, Claude version and sign-in, network to Anthropic, PATH; a fix for each problem | `src/setup/doctor.ts` | `test/security/setup.test.ts`, `test/unit/cli.test.ts` |
 | `sapi connect <client>`: curl, OpenAI Python and Node, LangChain, Vercel AI SDK; `--new-key` | `src/setup/connect.ts` | `test/unit/setup.test.ts`, `test/unit/cli.test.ts` |
 | `sapi uninstall [--purge]`: service and binary; `--purge` signs sapi's Claude profile out, then deletes only folders that are recognisably sapi's | `src/setup/uninstall.ts` | `test/security/setup.test.ts` |
 | Claude CLI install: Anthropic's installer, redirects followed only to Anthropic's hosts, shape-checked, run with bash from argv with the tested version and a minimal environment | `src/setup/claude.ts` | `test/unit/setup.test.ts` |
 | `scripts/install.sh`: OS and CPU detection, SHA-256 against `SHA256SUMS`, cosign signature when available (`SAPI_REQUIRE_SIGNATURE=1` to insist), `~/.local/bin`, no root | `scripts/install.sh`, `scripts/build-release.ts` | `test/security/install-script.test.ts` |
-| Install end-to-end on a fresh Ubuntu runner: tampered binary refused, install, setup with the test provider and the systemd service, a call, restart, re-run, doctor, uninstall | `.github/workflows/e2e-install.yml` | — |
 | VM guide | `docs/vm-setup.md` | — |
 
 ## Verified here (macOS 26.2)
@@ -37,8 +36,8 @@ Date: 2026-11-27. Branch: `phase-2-setup`.
 
 ## Not verified yet
 
-- **The systemd user unit on a real VM.** The commands are unit-tested with a recorder; it runs
-  for real in `e2e-install.yml` on the first CI run.
+- **The systemd user unit on a real VM.** The commands are unit-tested with a recorder; it needs
+  a run on a Linux VM, following `docs/vm-setup.md`.
 - **The launchd agent from the compiled binary** (from source it runs `bun src/cli.ts`; the
   compiled binary's agent is the same plist with one program argument fewer).
 - **Anthropic's installer** has not been run by sapi (claude is already installed here). Its
@@ -64,5 +63,7 @@ Date: 2026-11-27. Branch: `phase-2-setup`.
   the service itself runs).
 - **No release source yet.** `install.sh` refuses to guess a download URL until `REPO` is set
   (with the CODEOWNERS handle, before the first release).
+- **No install workflow in GitHub Actions**, at the owner's request. The plan's "e2e workflow on
+  a fresh Ubuntu runner" became a by-hand run: done on macOS (above), still to do on a Linux VM.
 - **ChatGPT sign-in** moves with the ChatGPT adapter to Phase 3. **Dashboard access** (one-time
   code, admin token) moves to Phase 4 with the dashboard.
