@@ -1,10 +1,11 @@
 /**
- * Repository policy checks that run on every build (ARI-42 SDLC-2, SDLC-5, SDLC-6, GW-2).
+ * Repository policy checks, run by `bun run ci` before every push (ARI-42 SDLC-2, SDLC-5, SDLC-6,
+ * GW-2).
  *
  * These are cited as evidence in ARI42.md, so keep them strict.
  */
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = join(import.meta.dir, "../..");
@@ -51,39 +52,56 @@ describe("SDLC-2: no permission-bypass modes in shipped code", () => {
   }
 });
 
-describe("SDLC-5 / GW-2: GitHub workflows are locked down", () => {
-  const workflows = readdirSync(join(ROOT, ".github/workflows")).filter((f) => /\.ya?ml$/.test(f));
+/** What's wrong with a GitHub workflow file, as far as SDLC-5 and GW-2 go. */
+function workflowProblems(text: string): string[] {
+  const out: string[] = [];
+  if (!/^permissions:\s*(read-all|\n\s+contents:\s*read)/m.test(text)) out.push("token isn't read-only by default");
+  if (/^\s*(pull_request_target|issue_comment)\s*:/m.test(text))
+    out.push("pull_request_target or issue_comment trigger");
+  const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1] ?? "");
+  if (uses.some((u) => !u.startsWith("./") && !/@[0-9a-f]{40}$/.test(u)))
+    out.push("an action isn't pinned to a full commit SHA");
+  const checkouts = text.split(/\n(?=\s*- )/).filter((s) => s.includes("actions/checkout@"));
+  if (checkouts.some((c) => !/persist-credentials:\s*false/.test(c))) out.push("checkout persists credentials");
+  if (/claude-code-action|codex-action|run-gemini-cli|\bclaude\s+-p\b|\bcodex\s+exec\b/.test(text))
+    out.push("an AI agent step");
+  return out;
+}
 
-  test("there are workflows to check", () => {
-    expect(workflows.length).toBeGreaterThan(0);
+describe("SDLC-5 / GW-2: GitHub workflows are locked down", () => {
+  // sapi has no workflows: no hosted CI, at the owner's request (`bun run ci` runs the checks).
+  // A workflow added later must pass the same policy.
+  test("the policy passes a safe workflow and catches every problem in an unsafe one", () => {
+    const safe = [
+      "on: [pull_request]",
+      "permissions:",
+      "  contents: read",
+      "jobs:",
+      "  t:",
+      "    steps:",
+      `      - uses: actions/checkout@${"a".repeat(40)}`,
+      "        with:",
+      "          persist-credentials: false",
+    ].join("\n");
+    const unsafe = [
+      "on:",
+      "  pull_request_target:",
+      "permissions: write-all",
+      "jobs:",
+      "  t:",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      `      - uses: example/${["claude", "code", "action"].join("-")}@v1`, // built from parts
+    ].join("\n");
+    expect(workflowProblems(safe)).toEqual([]);
+    expect(workflowProblems(unsafe)).toHaveLength(5);
   });
 
+  const dir = join(ROOT, ".github/workflows");
+  const workflows = existsSync(dir) ? readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)) : [];
   for (const wf of workflows) {
-    const text = read(`.github/workflows/${wf}`);
-
-    test(`${wf}: read-only token by default`, () => {
-      expect(text).toMatch(/^permissions:\s*(read-all|\n\s+contents:\s*read)/m);
-    });
-
-    test(`${wf}: no pull_request_target or issue_comment triggers`, () => {
-      expect(text).not.toMatch(/^\s*(pull_request_target|issue_comment)\s*:/m);
-    });
-
-    test(`${wf}: every action is pinned to a full commit SHA`, () => {
-      const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1] ?? "");
-      for (const u of uses) {
-        if (u.startsWith("./")) continue; // local actions
-        expect(u).toMatch(/@[0-9a-f]{40}$/);
-      }
-    });
-
-    test(`${wf}: checkout never persists credentials`, () => {
-      const checkouts = text.split(/\n(?=\s*- )/).filter((s) => s.includes("actions/checkout@"));
-      for (const c of checkouts) expect(c).toMatch(/persist-credentials:\s*false/);
-    });
-
-    test(`${wf}: no AI agent steps`, () => {
-      expect(text).not.toMatch(/claude-code-action|codex-action|run-gemini-cli|\bclaude\s+-p\b|\bcodex\s+exec\b/);
+    test(`${wf} is locked down`, () => {
+      expect(workflowProblems(read(`.github/workflows/${wf}`))).toEqual([]);
     });
   }
 });

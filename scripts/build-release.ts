@@ -2,9 +2,9 @@
  * Build release binaries and SHA256SUMS (the files scripts/install.sh downloads).
  *
  *   bun scripts/build-release.ts                       # all four targets into dist/
- *   bun scripts/build-release.ts --targets linux-x64   # just one (CI's install test)
+ *   bun scripts/build-release.ts --targets linux-x64   # just one
  *
- * Signing (cosign), provenance and the SBOM are added by the release workflow in Phase 5.
+ * Signing (cosign), provenance and the SBOM come in Phase 5.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

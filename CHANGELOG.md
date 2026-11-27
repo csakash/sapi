@@ -27,6 +27,12 @@ customers.
 - Security suite in `test/security/` and contract tests with openai-node, openai-python and
   LangChain. `scripts/e2e/real-claude.ts` runs the same SDKs against a real signed-in subscription.
 
+### Removed
+- GitHub Actions workflows (CI, CodeQL, gitleaks, dependency review, Scorecard, ARI-42 gate), at
+  the owner's request. `bun run ci` runs the same checks locally: install with the lockfile,
+  lint, types, tests with the sandbox suite required, a compiled binary, the ARI-42 scan and
+  gate, gitleaks and the sign-off check.
+
 ### AI changes
 - `sapi setup` can install the `claude` CLI (the tested version, 2.1.332) with Anthropic's official
   installer, after the user says yes. The installer runs outside sapi's sandbox, as installing it

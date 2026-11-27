@@ -8,21 +8,23 @@ ARI-42 skill and reviewed by people. Update it in the same change as the code.
 - **Score:** 14 of 34 in-scope requirements met with evidence · 0 Risk · 1 Gap · 15 Partial · 4 Human
 
 Scope follows the project lens for what sapi is being built to be (an LLM gateway that embeds the
-`claude` coding-agent CLI and exposes an agent HTTP endpoint), not only what the scanner finds. The
-CI gate runs in report mode until the 0.1 release, then blocks.
+`claude` coding-agent CLI and exposes an agent HTTP endpoint), not only what the scanner finds. There is
+no hosted CI (no GitHub Actions, at the owner's request): `bun run ci` (`scripts/ci.ts`) runs the
+tests, the security evals and this gate before every push. The gate reports until the 0.1 release,
+then blocks.
 
 Phase 1 verification ran on macOS 26.2 (sandbox-exec), including a real end-to-end run against a
 signed-in Claude subscription (`scripts/e2e/real-claude.ts`: openai-node, openai-python and
 LangChain, streamed and non-streamed, all passing; a kill switch stopped a live Claude stream in
 0.4 s). The Linux launchers (bwrap and the systemd
-user-service fallback) are written and unit-checked, and CI installs bubblewrap and refuses to skip
-the confinement suite, but they have not run yet: that happens on the first CI run or on the VM.
+user-service fallback) are written and unit-checked, and `bun run ci` refuses to skip the
+confinement suite, but they have not run yet: that happens on the VM.
 Requirements that depend on them stay Partial until then.
 
 ## AI-BOM (GOV-1)
 
 Checked by hand against `python3 .agents/skills/ari42/scripts/ari42_scan.py detect .`. Generation
-from the provider manifests in CI is still to do.
+from the provider manifests is still to do.
 
 | Component | Kind | Version / pin | Where | Data it can reach | Owner |
 |---|---|---|---|---|---|
@@ -64,7 +66,7 @@ Status: **Met** (enforced + passing check) · **Partial** · **Gap** · **Risk**
 
 | ID | Requirement | Status | Evidence / reason |
 |---|---|---|---|
-| GOV-1 | Maintain an AI bill of materials | Partial | AI-BOM above, written by hand and checked against the scanner; generation from provider manifests in CI still to do |
+| GOV-1 | Maintain an AI bill of materials | Partial | AI-BOM above, written by hand and checked against the scanner; generation from provider manifests still to do |
 | GOV-2 | AI policy and risk assessment | Human | Draft in `docs/threat-model.md`; the maintainer signs it |
 | GOV-3 | Notify customers of AI changes | N/A | No customers: every user runs their own copy. An AI changes section is kept in `CHANGELOG.md` anyway |
 | GOV-4 | Define agent autonomy and owner | Partial | Agent register above, reviewed 2026-11-27; zero tools enforced in code and tested in `test/unit/claude-stream.test.ts` and `test/security/env-scrub.test.ts`. Missing: a named owner |
@@ -90,27 +92,29 @@ Status: **Met** (enforced + passing check) · **Partial** · **Gap** · **Risk**
 | MCP-2 | Detect tool-description changes | N/A | sapi consumes no third-party tools or MCP servers |
 | MCP-3 | Authenticate exposed MCP/agent APIs | Met | `test/security/http.test.ts` and `test/security/auth-everywhere.test.ts`: no key → 401, wrong Host → 403, foreign Origin or cross-site → 403, rate limit → 429, client key on `/api` → 403, loopback-only bind, no CORS. The background service runs the same loopback-only server; a keyless call to the launchd agent got 401 when checked by hand (`docs/phase2-notes.md`) |
 | MCP-4 | Sandbox MCP servers | N/A | sapi launches no MCP servers |
-| GW-1 | Protect provider keys | Met | `test/security/env-scrub.test.ts`: the child environment is an allowlist and none of sapi's secrets reach it; the `auth = "env"` token is read from a 0600 file and passed only to the child. `test/unit/core.test.ts`: one redactor for logs. gitleaks runs in CI. The launchd plist and systemd unit hold paths only, whatever the environment holds (`test/unit/setup.test.ts`); Anthropic's installer runs with a minimal environment. sapi holds no provider keys yet (ChatGPT tokens arrive in Phase 3 with the secret store) |
-| GW-2 | Agent stack as critical supply chain | Partial | `test/unit/repo-policy.test.ts` (lockfile hashes, SHA-pinned actions, digest-pinned dev container); the `claude` version range is checked before every run (`src/providers/claude-sub/adapter.ts`); every endpoint authenticated (`test/security/auth-everywhere.test.ts`). `scripts/install.sh` installs only a binary that matches `SHA256SUMS`, refuses non-https sources, and refuses an unsigned release when asked (`test/security/install-script.test.ts`); setup installs only the tested `claude` version, through Anthropic's installer, following redirects only to Anthropic's hosts (`test/unit/setup.test.ts`). Missing: signed releases, provenance, SBOM (Phase 5) |
+| GW-1 | Protect provider keys | Met | `test/security/env-scrub.test.ts`: the child environment is an allowlist and none of sapi's secrets reach it; the `auth = "env"` token is read from a 0600 file and passed only to the child. `test/unit/core.test.ts`: one redactor for logs. gitleaks scans the whole history in `bun run ci` (`scripts/ci.ts`). The launchd plist and systemd unit hold paths only, whatever the environment holds (`test/unit/setup.test.ts`); Anthropic's installer runs with a minimal environment. sapi holds no provider keys yet (ChatGPT tokens arrive in Phase 3 with the secret store) |
+| GW-2 | Agent stack as critical supply chain | Partial | `test/unit/repo-policy.test.ts` (lockfile hashes, SHA-pinned actions in any workflow, digest-pinned dev container); the `claude` version range is checked before every run (`src/providers/claude-sub/adapter.ts`); every endpoint authenticated (`test/security/auth-everywhere.test.ts`). `scripts/install.sh` installs only a binary that matches `SHA256SUMS`, refuses non-https sources, and refuses an unsigned release when asked (`test/security/install-script.test.ts`); setup installs only the tested `claude` version, through Anthropic's installer, following redirects only to Anthropic's hosts (`test/unit/setup.test.ts`). Missing: signed releases, provenance, SBOM (Phase 5) |
 | GW-3 | Pin models; evaluate before switching | Partial | Aliases map to full IDs and "-latest" is refused (`test/unit/core.test.ts`). Missing: `sapi eval` before a mapping change |
 | LOG-1 | Log every agent run | Partial | One hash-chained, metadata-only row per request with the template version (`test/security/kill-switch.test.ts`, `test/unit/core.test.ts`); one redactor; `sapi doctor` verifies the chain and catches a row deleted outside sapi (`test/security/setup.test.ts`). Missing: retention and purge (`sapi purge`) |
 | LOG-2 | Detect abnormal agent behaviour | Gap | The inputs are recorded (auth failures, blocked egress, kill switches, unsafe child init) but nothing alerts yet: Phase 4 |
 | LOG-3 | Plan for AI incidents | Human | Runbooks drafted in Phase 5; the maintainer owns them |
 | LOG-4 | Customer access to agent records | N/A | Not multi-tenant; `sapi export --client` is planned anyway |
-| EVAL-1 | Gate releases on security evals | Partial | `test/security/` runs on every CI build with zero failures allowed, and CI fails if the confinement suite would skip; install, setup, the service, doctor and uninstall are checked by hand (`docs/phase2-notes.md`; no install workflow, at the owner's request). Becomes a required check when the repository is published with branch protection |
+| EVAL-1 | Gate releases on security evals | Partial | `scripts/ci.ts` (`bun run ci`) runs `test/security/` with zero failures allowed and fails if the confinement suite would skip; install, setup, the service, doctor and uninstall are checked by hand (`docs/phase2-notes.md`). Missing: nothing runs automatically, since there is no hosted CI (see Exceptions), so a push without `bun run ci` isn't gated |
 | EVAL-2 | Independent adversarial testing | Human | Before 1.0, then yearly |
 | EVAL-3 | Version prompts and config as code | Met | `src/prompts/transcript-v1.ts` is versioned; the version is logged on every request (`test/security/kill-switch.test.ts`) |
 | SDLC-1 | Approve coding assistants | Human | Policy drafted in `CONTRIBUTING.md` (AI-assisted contributions); the maintainer signs |
 | SDLC-2 | Sandbox coding agents | Partial | Dev container `.devcontainer/devcontainer.json`; `test/unit/repo-policy.test.ts` fails on bypass flags in `src/` and `scripts/`; no managed policy for contributors' own machines |
-| SDLC-3 | Review AI-written code | Partial | CodeQL, gitleaks, dependency review workflows in `.github/workflows/`; branch protection set when the repo is published |
+| SDLC-3 | Review AI-written code | Partial | `scripts/ci.ts` runs Biome, tsc, the ARI-42 scan and gitleaks before a push; a person merges every PR, never an agent. Missing: CodeQL, dependency review and required status checks, which ran as GitHub Actions (see Exceptions) |
 | SDLC-4 | Protect agent configuration | Partial | sapi's Claude profile is separate from the user's, and the child can't read or write sapi's config or database (`test/security/confinement.test.ts`); policy changes only through the CLI, never over HTTP (`test/security/auth-everywhere.test.ts`); the child can't write a launchd agent or systemd unit (`test/security/confinement.test.ts`); CODEOWNERS covers the installer, service and sandbox code. Missing: a real handle in `.github/CODEOWNERS` |
-| SDLC-5 | Isolate CI agents | Met | No AI step runs in CI. `test/unit/repo-policy.test.ts` checks every workflow: read-only token by default, no `pull_request_target` or `issue_comment` trigger, SHA-pinned actions, no persisted credentials, no agent steps |
-| SDLC-6 | Block hallucinated packages | Met | `test/unit/repo-policy.test.ts` checks exact versions, an integrity hash for every locked package, and Renovate's 7-day minimum release age; CI installs with `--frozen-lockfile`. Phase 1's two new packages (`zod` 4.6.7, `openai` 7.61.0) were checked on npm: intended package, years old, release older than 7 days |
+| SDLC-5 | Isolate CI agents | Met | There is no hosted CI, so no AI step runs in it. `test/unit/repo-policy.test.ts` proves the workflow policy on a safe and an unsafe sample and applies it to any workflow that is added: read-only token by default, no `pull_request_target` or `issue_comment` trigger, SHA-pinned actions, no persisted credentials, no agent steps |
+| SDLC-6 | Block hallucinated packages | Met | `test/unit/repo-policy.test.ts` checks exact versions, an integrity hash for every locked package, and Renovate's 7-day minimum release age; `bun run ci` installs with `--frozen-lockfile`. Phase 1's two new packages (`zod` 4.6.7, `openai` 7.61.0) were checked on npm: intended package, years old, release older than 7 days |
 
 ## Exceptions
 
 | ID | What is not met | Why accepted | Accepted by | Review by |
 |---|---|---|---|---|
+| EVAL-1 | Security evals run only when someone runs `bun run ci`; no hosted CI gates pushes or pull requests, and nothing runs on Linux or ARM automatically | The owner asked for no GitHub Actions (the account's Actions were locked over billing); `bun run ci` runs the same checks locally | csakash (repository owner), 2026-11-27 | 2027-02-27 |
+| SDLC-3 | No CodeQL, dependency review or OpenSSF Scorecard, and no required status checks | Same decision: these ran as GitHub Actions | csakash (repository owner), 2026-11-27 | 2027-02-27 |
 
 ## Notes on scanner findings
 
@@ -126,6 +130,7 @@ neither this scanner nor gitleaks mistakes test inputs for leaks.
 - [ ] SDLC-4: replace the placeholder handle in `.github/CODEOWNERS`, and the same placeholder in `REPO` at the top of `scripts/install.sh` (the installer refuses to guess a download source until then).
 - [ ] AUTH-3: sign the N/A as an exception. The scanner now detects a vendor SDK (`openai`, used only by the contract tests).
 - [ ] INJ-1: review the trust-boundary table and date it.
+- [ ] EVAL-1 and SDLC-3: review the no-hosted-CI exceptions by 2027-02-27.
 - [ ] LOG-3 and EVAL-2: own the incident runbooks and the independent review (later phases).
 
 ## Change log
@@ -134,5 +139,6 @@ neither this scanner nor gitleaks mistakes test inputs for leaks.
 |---|---|---|---|
 | 2026-11-27 | Phase 0: repository skeleton, CI, Claude CLI probes and fixtures, ARI-42 installed | GOV-1, GOV-4, INJ-2, INJ-4, OUT-4, MCP-1, GW-1, GW-2, SDLC-2–6 | 2 of 34 met |
 | 2026-11-27 | Phase 2: `sapi setup` (guided and `--yes`), `doctor`, `connect`, launchd and systemd user service, `start`/`stop`, `uninstall [--purge]`, `scripts/install.sh` with checksum and optional signature check, Claude CLI install through Anthropic's installer, `docs/vm-setup.md` | DATA-3, AUTH-1, OUT-4, MCP-3, GW-1, GW-2, LOG-1, EVAL-1, SDLC-4 | 14 of 34 met; DATA-3 Gap → Partial |
+| 2026-11-27 | GitHub Actions removed at the owner's request (all six workflows); `scripts/ci.ts` (`bun run ci`) runs the same checks locally; the workflow policy test proves itself on samples | EVAL-1, SDLC-3, SDLC-5, SDLC-6, GW-1, GW-2, GOV-1 | unchanged: 14 of 34 met; EVAL-1 and SDLC-3 carry accepted exceptions |
 | 2026-11-27 | Phase 1 real-Claude run: per-request `HOME` gets a `Library/Keychains` link on macOS (the CLI's sign-in lives in the login keychain), and the sandbox lets the CLI write that folder; `scripts/e2e/real-claude.ts` | OUT-4, INJ-2, DATA-1, EVAL-1 | unchanged: 14 of 34 met |
 | 2026-11-27 | Phase 1: gateway core (HTTP guards, client keys, rate limits, budgets, kill switches, scheduler, hash-chained meter), `/v1/chat/completions` and `/v1/models`, Claude adapter with sandbox-exec, bwrap and systemd launchers and the egress proxy; security suite in `test/security/`; contract tests with openai-node, openai-python and LangChain | DATA-1, DATA-2, DATA-5, AUTH-1, AUTH-2, AUTH-3, AUTH-4, INJ-2–5, OUT-1, OUT-4, MCP-1, MCP-3, GW-1–3, LOG-1, LOG-2, EVAL-1, EVAL-3, SDLC-4, SDLC-6 | 14 of 34 met |

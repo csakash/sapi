@@ -115,8 +115,8 @@ Claude provider reports "not ready" rather than running unconfined (unless you s
 `[claude] confinement = "best-effort"`, which `doctor` keeps warning about).
 
 Turning the AppArmor restriction off for the whole machine
-(`kernel.apparmor_restrict_unprivileged_userns=0`) also works; CI does that on throwaway runners,
-but on a machine you keep, prefer the profile above.
+(`kernel.apparmor_restrict_unprivileged_userns=0`) also works and is fine on a throwaway VM, but on
+a machine you keep, prefer the profile above.
 
 ## Lingering
 

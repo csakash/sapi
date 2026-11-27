@@ -24,7 +24,7 @@ it before 0.1. It describes the design in the build plan; the code arrives from 
 | A client app with a valid key | Exceed its share, read other clients' data, inject CLI flags, forge conversation turns | Scopes, budgets, rate limits, per-client isolation, model names only from config, argv-only spawning, escaped transcript tags |
 | Hostile prompt content | Hijack the Claude child to act or leak data | No tools, no MCP, empty environment and working directory, egress allowlist, OS sandbox. The model can be fully hijacked and still has nothing to act with |
 | Request data shown on the dashboard | Stored XSS through client names, user agents or errors | Text-only rendering, strict CSP |
-| A compromised dependency or release | Ship malicious code to users | Few dependencies, hashed lockfile, minimum package age, SHA-pinned CI, signed releases with provenance and an SBOM |
+| A compromised dependency or release | Ship malicious code to users | Few dependencies, hashed lockfile, minimum package age, signed releases with provenance and an SBOM |
 | A stolen laptop or VM disk | Read tokens and keys | OS secret store or machine-bound encryption; key hashes only; no request bodies by default |
 | A runaway client | Use up the subscription window | Budgets that halt, per-client window caps, kill switches, alerts |
 | Provider-side changes | CLI flags or output change, terms tighten | Tested CLI version range, replay tests on recorded fixtures, `sapi doctor` warnings, terms re-checked each release |

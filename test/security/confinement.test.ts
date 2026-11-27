@@ -6,7 +6,7 @@
  * anything off the allowlist.
  *
  * The probe runs through the real ClaudeAdapter (env, argv, work dir, launcher, proxy). When no
- * launcher works on the machine the test is skipped and says why; CI on macOS always runs it.
+ * launcher works on the machine the test is skipped and says why; `bun run ci` refuses that skip.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -24,7 +24,7 @@ const launcher = probe.launcher;
 const tried = probe.tried.map((t) => t.name).join(", ") || "none";
 if (!launcher) console.warn(`confinement tests skipped: no launcher works here (tried ${tried})`);
 
-// CI sets this so a missing sandbox fails the build instead of quietly skipping (EVAL-1).
+// `bun run ci` sets this so a missing sandbox fails the build instead of quietly skipping (EVAL-1).
 test.if(process.env.SAPI_REQUIRE_SANDBOX_TESTS === "1")("a sandbox launcher is available", () => {
   expect({ launcher: launcher?.name ?? null, tried }).toEqual({ launcher: expect.any(String), tried });
 });

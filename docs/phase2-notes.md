@@ -63,7 +63,10 @@ Date: 2026-11-27. Branch: `phase-2-setup`.
   the service itself runs).
 - **No release source yet.** `install.sh` refuses to guess a download URL until `REPO` is set
   (with the CODEOWNERS handle, before the first release).
-- **No install workflow in GitHub Actions**, at the owner's request. The plan's "e2e workflow on
-  a fresh Ubuntu runner" became a by-hand run: done on macOS (above), still to do on a Linux VM.
+- **No GitHub Actions at all**, at the owner's request (the account's Actions were locked over
+  billing). The six Phase 0 workflows are gone too; `bun run ci` (`scripts/ci.ts`) runs the same
+  checks by hand before a push. The plan's "e2e workflow on a fresh Ubuntu runner" became a
+  by-hand run: done on macOS (above), still to do on a Linux VM, where `bun run ci` also runs the
+  Linux confinement suite.
 - **ChatGPT sign-in** moves with the ChatGPT adapter to Phase 3. **Dashboard access** (one-time
   code, admin token) moves to Phase 4 with the dashboard.

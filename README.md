@@ -65,7 +65,7 @@ sapi is not affiliated with Anthropic or OpenAI. Their names describe compatibil
 
 ## Security
 
-sapi is built to the [ARI-42](ARI42.md) agent-security requirements, checked in CI:
+sapi is built to the [ARI-42](ARI42.md) agent-security requirements, checked by `bun run ci`:
 
 - Listens on `127.0.0.1` only, requires a key for every client, and rejects requests from web pages.
 - No telemetry. sapi never phones home.
@@ -81,7 +81,7 @@ container in `.devcontainer/`.
 
 ```bash
 bun install --frozen-lockfile
-bun run check
+bun run ci
 ```
 
 ## License

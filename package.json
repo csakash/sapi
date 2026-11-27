@@ -19,6 +19,7 @@
     "format": "biome format --write .",
     "check": "bun run lint && bun run typecheck && bun test",
     "ari42": "python3 .agents/skills/ari42/scripts/ari42_scan.py verify . --report",
+    "ci": "bun scripts/ci.ts",
     "build": "bun scripts/build-release.ts"
   },
   "devDependencies": {

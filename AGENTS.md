@@ -10,6 +10,7 @@ rules below come before anything else.
 bun install --frozen-lockfile
 bun run check        # biome lint + format check, tsc, bun test
 bun run ari42        # ARI-42 gate (report mode until the 0.1 release)
+bun run ci           # everything that must pass before a push (there is no hosted CI)
 ```
 
 ## Rules that are never relaxed
@@ -37,7 +38,7 @@ bun run ari42        # ARI-42 gate (report mode until the 0.1 release)
   `providers/` (adapters and manifests), `prompts/` (versioned templates), `doors/` (API formats),
   `setup/` (setup, doctor, connect, uninstall, the launchd and systemd service, the Claude
   installer hand-off).
-- `test/unit/`, `test/security/` (ARI-42 security evals; never skip them in CI), `test/contract/`
+- `test/unit/`, `test/security/` (ARI-42 security evals; never skip them: `bun run ci` refuses to), `test/contract/`
   (real SDKs against the fake provider), `test/fixtures/`.
 - `scripts/install.sh` (checksum-verifying installer), `scripts/build-release.ts`,
   `scripts/e2e/real-claude.ts` (end-to-end against a real subscription), `scripts/phase0/` probes,
