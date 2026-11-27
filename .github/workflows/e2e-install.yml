@@ -1,0 +1,109 @@
+name: Install end-to-end
+
+# A fresh Ubuntu runner goes through what a new user does on a VM (plan §5, Phase 2):
+# install.sh (checksum verified), sapi setup --yes with the test provider, the systemd user
+# service, a call through it, a restart, doctor, then uninstall --purge. No Claude account is
+# involved: the built-in test provider answers.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: Fresh Ubuntu, install to uninstall
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install build dependencies (lockfile must match)
+        run: bun install --frozen-lockfile
+
+      - name: Build the release binary and SHA256SUMS
+        run: bun scripts/build-release.ts --targets linux-x64 --out "$RUNNER_TEMP/release"
+
+      # Runners have no login session, so the systemd user manager isn't running. On a real VM
+      # it is; sapi setup turns lingering on itself, or prints this sudo command when it can't.
+      - name: Start a systemd user manager for the runner user
+        run: |
+          sudo loginctl enable-linger "$USER"
+          uid="$(id -u)"
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" >> "$GITHUB_ENV"
+          for _ in $(seq 1 40); do
+            [ -S "/run/user/$uid/bus" ] && break
+            sleep 0.25
+          done
+
+      - name: install.sh refuses a tampered binary
+        run: |
+          bad="$RUNNER_TEMP/bad-release"
+          cp -r "$RUNNER_TEMP/release" "$bad"
+          printf 'tampered' >> "$bad/sapi-linux-x64"
+          if SAPI_DOWNLOAD_BASE="file://$bad" SAPI_INSTALL_DIR="$RUNNER_TEMP/bad-bin" sh scripts/install.sh; then
+            echo "install.sh accepted a tampered binary" >&2
+            exit 1
+          fi
+          test ! -e "$RUNNER_TEMP/bad-bin/sapi"
+
+      - name: install.sh (checksum verified, no root)
+        env:
+          SAPI_DOWNLOAD_BASE: file://${{ runner.temp }}/release
+        run: |
+          sh scripts/install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: sapi setup --yes with the test provider and the background service
+        run: |
+          sapi setup --yes --providers fake --client e2e --env-file "$RUNNER_TEMP/e2e/sapi.env" --service
+          systemctl --user is-active sapi.service
+          stat -c '%a' "$RUNNER_TEMP/e2e/sapi.env" | grep -qx 600
+
+      - name: A call through the service
+        run: |
+          set -a; . "$RUNNER_TEMP/e2e/sapi.env"; set +a
+          curl -fsS "$OPENAI_BASE_URL/chat/completions" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
+            -d '{"model":"echo","messages":[{"role":"user","content":"hello from ci"}]}' \
+            | grep -q '"echo: hello from ci"'
+          # No key, no answer.
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$OPENAI_BASE_URL/models")" = 401
+
+      - name: The service comes back after a restart, and setup is safe to run again
+        run: |
+          systemctl --user restart sapi.service
+          sapi setup --yes --providers fake --client e2e --env-file "$RUNNER_TEMP/e2e/sapi.env" --service
+          set -a; . "$RUNNER_TEMP/e2e/sapi.env"; set +a
+          curl -fsS "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY" | grep -q '"echo"'
+
+      - name: sapi doctor
+        run: sapi doctor --offline
+
+      - name: sapi uninstall --purge removes everything
+        run: |
+          sapi uninstall --purge --yes
+          test ! -e "$HOME/.local/bin/sapi"
+          test ! -e "$HOME/.config/systemd/user/sapi.service"
+          test ! -d "$HOME/.local/share/sapi"
+          test ! -d "$HOME/.config/sapi"
+          ! systemctl --user is-active --quiet sapi.service
+
+      - name: Service logs (on failure)
+        if: failure()
+        run: journalctl --user -u sapi -n 100 --no-pager || true

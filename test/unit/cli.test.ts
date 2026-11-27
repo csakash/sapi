@@ -40,7 +40,7 @@ describe("cli", () => {
 
   test("unknown commands fail clearly; planned ones say so", async () => {
     expect((await run(["frobnicate"])).code).toBe(2);
-    const planned = await run(["setup"]);
+    const planned = await run(["stats"]);
     expect(planned.code).toBe(2);
     expect(planned.out).toContain("not implemented yet");
   });
@@ -54,6 +54,32 @@ describe("cli", () => {
     expect(list.out).toContain("my-scripts");
     expect(list.out).not.toContain(key!);
     expect(list.out).toContain(key!.slice(0, 16));
+  });
+
+  test("connect prints snippets without the key; --new-key issues one and shows it once", async () => {
+    const plain = await run(["connect", "my-scripts"]);
+    expect(plain.code).toBe(0);
+    expect(plain.out).toContain("OpenAI Python");
+    expect(plain.out).toContain('"haiku"');
+    expect(plain.out).not.toMatch(/sk-sapi-[A-Za-z0-9_-]{43}/);
+    const fresh = await run(["connect", "my-scripts", "--new-key", "--tool", "env"]);
+    expect(fresh.code).toBe(0);
+    expect(fresh.out.match(/sk-sapi-[A-Za-z0-9_-]{43}/g)).toHaveLength(1);
+    expect((await run(["connect", "nobody"])).code).toBe(1);
+    expect((await run(["connect", "my-scripts", "--tool", "bash"])).code).toBe(1);
+  });
+
+  test("reserved client names can't be created", async () => {
+    const r = await run(["clients", "add", "sapi-selftest"]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("reserved");
+  });
+
+  test("doctor --json --offline returns every check as data", async () => {
+    const r = await run(["doctor", "--json", "--offline"]);
+    const checks = JSON.parse(r.out) as Array<{ id: string; status: string }>;
+    expect(checks.map((c) => c.id)).toEqual(expect.arrayContaining(["user", "config", "log-chain", "service"]));
+    expect(checks.every((c) => ["ok", "warn", "fail", "skip"].includes(c.status))).toBe(true);
   });
 
   test("clients add refuses unknown models, bad names and duplicates", async () => {

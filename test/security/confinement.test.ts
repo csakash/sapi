@@ -42,6 +42,10 @@ beforeAll(async () => {
   mkdirSync(join(home, ".ssh"), { recursive: true });
   mkdirSync(join(home, "Library", "Keychains"), { recursive: true });
   mkdirSync(join(home, "Library", "Preferences"), { recursive: true });
+  // Where a background service would be installed: the child must never be able to add one.
+  const persistenceDir =
+    process.platform === "darwin" ? join(home, "Library", "LaunchAgents") : join(home, ".config", "systemd", "user");
+  mkdirSync(persistenceDir, { recursive: true });
   writeFileSync(join(home, ".ssh", "id_test"), "PRIVATE KEY MATERIAL");
   const dataDir = ensurePrivateDir(paths.dataDir);
   const configDir = ensurePrivateDir(paths.configDir);
@@ -82,6 +86,7 @@ beforeAll(async () => {
     outsideFile: join(home, "pwned.txt"),
     keychainDir: join(home, "Library", "Keychains"),
     libraryFile: join(home, "Library", "Preferences", "pwned.plist"),
+    persistenceFile: join(persistenceDir, process.platform === "darwin" ? "pwned.plist" : "pwned.service"),
   });
   let text = "";
   for await (const ev of adapter.send(
@@ -138,6 +143,10 @@ describe.skipIf(!launcher)(`confinement under ${launcher?.name ?? "no launcher"}
 
   test.if(process.platform !== "darwin")("Linux: no keychain link in the child's HOME", () => {
     expect(report.keychainLinked).toBe(false);
+  });
+
+  test("the child can't install a launchd agent or systemd unit (SDLC-4: no persistence)", () => {
+    expect(report.writePersistenceBlocked).toBe(true);
   });
 
   test("no direct network: an internet address and the metadata address are unreachable (INJ-4)", () => {

@@ -123,6 +123,7 @@ switch (true) {
       outsideFile: string;
       keychainDir: string;
       libraryFile: string;
+      persistenceFile: string;
     };
     const homeKeychains = join(process.env.HOME ?? "/nonexistent", "Library", "Keychains");
     const report = {
@@ -138,6 +139,7 @@ switch (true) {
       }).then((b) => !b),
       writeKeychainAllowed: !(await blocked(() => writeFileSync(join(homeKeychains, "probe.txt"), "x"))),
       writeOtherLibraryBlocked: await blocked(() => writeFileSync(p.libraryFile, "x")),
+      writePersistenceBlocked: await blocked(() => writeFileSync(p.persistenceFile, "x")),
       directInternetBlocked: await blocked(() => tcp("1.1.1.1", 443)),
       directMetadataBlocked: await blocked(() => tcp("169.254.169.254", 80)),
       proxyExampleCom: await viaProxy("example.com:443").catch(() => -1),

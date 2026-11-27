@@ -81,6 +81,7 @@ export const bearer = (key: string) => ({ authorization: `Bearer ${key}` });
 export const fakeSecret = {
   anthropic: (kind = "api03") => ["sk", "ant", kind, "TESTONLY".repeat(4)].join("-"),
   openai: () => ["sk", "proj", "TESTONLY".repeat(4)].join("-"),
+  sapi: () => ["sk", "sapi", `${"TESTONLY".repeat(5)}abc`].join("-"),
   github: () => ["ghp", "TESTONLY".repeat(5)].join("_"),
   aws: () => ["AK", "IA", "TESTONLYTESTONLY"].join(""),
   jwt: () => ["eyJ", "hbGciOiJIUzI1NiJ9", ".eyJ", "zdWIiOiJ0ZXN0In0", ".", "c2lnbmF0dXJlLXRlc3Qtb25seQ"].join(""),
