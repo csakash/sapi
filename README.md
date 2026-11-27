@@ -5,9 +5,37 @@ and ChatGPT subscriptions. Point your app's `base_url` at `http://127.0.0.1:8787
 key, and sapi routes the call to the right subscription, then shows which app used what and how
 close you are to each limit.
 
-> **Status: Phase 0 (foundations).** Nothing here is usable yet. The gateway lands in Phase 1.
-> The build plan is in `docs/` once published; Phase 0 findings are in
-> [docs/phase0-findings.md](docs/phase0-findings.md).
+> **Status: Phase 1 (secure core).** Text chat through your Claude subscription works from source
+> on macOS; Linux confinement is written and runs in CI. Guided setup, the background service,
+> ChatGPT and the dashboard come in later phases. Notes: [Phase 0](docs/phase0-findings.md),
+> [Phase 1](docs/phase1-notes.md).
+
+## Try it from source (Phase 1)
+
+```bash
+bun install --frozen-lockfile
+bun src/cli.ts login claude          # signs in a separate Claude profile that only sapi uses
+bun src/cli.ts clients add my-app    # prints a key once
+bun src/cli.ts start                 # 127.0.0.1:8787
+```
+
+Then point any OpenAI-compatible client at it:
+
+```bash
+export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
+export OPENAI_API_KEY=sk-sapi-…      # the key from clients add
+```
+
+Models are aliases from the config (`haiku`, `sonnet`, `opus` by default). `bun src/cli.ts status`
+shows the sandbox in use, the Claude sign-in, kill switches and log integrity.
+
+To check the whole path against your subscription (about eight tiny Haiku calls through
+openai-node, and openai-python and LangChain if installed):
+
+```bash
+bun src/cli.ts clients add e2e --print-env > e2e.env && chmod 600 e2e.env
+set -a; . ./e2e.env; set +a; bun scripts/e2e/real-claude.ts
+```
 
 sapi is not affiliated with Anthropic or OpenAI. Their names describe compatibility only.
 

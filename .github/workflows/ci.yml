@@ -39,9 +39,23 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
-      # Includes test/unit/repo-policy.test.ts: no permission-bypass flags, locked-down workflows,
-      # pinned dependencies (ARI-42 SDLC-2, SDLC-5, SDLC-6, GW-2).
-      - name: Tests
+      # The Linux confinement tests need bubblewrap. Ubuntu 24.04 blocks unprivileged user
+      # namespaces through AppArmor by default; this throwaway runner lifts that so the Linux
+      # sandbox is really exercised (users get the same explanation from sapi setup).
+      - name: Install bubblewrap (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      # Includes test/unit/repo-policy.test.ts (no permission-bypass flags, locked-down workflows,
+      # pinned dependencies) and test/security/ (ARI-42 security evals: auth, egress, confinement,
+      # env scrub, kill switch). SAPI_REQUIRE_SANDBOX_TESTS turns a skipped confinement test into
+      # a failure, so CI can't pass without running it.
+      - name: Tests and security evals
+        env:
+          SAPI_REQUIRE_SANDBOX_TESTS: "1"
         run: bun test
 
       - name: Compile a standalone binary for this runner

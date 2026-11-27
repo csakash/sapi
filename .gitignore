@@ -15,3 +15,6 @@ board/
 # Local Claude Code state (the ARI-42 skill under .claude/skills and settings.json are committed)
 .claude/.cc-writes/
 .claude/settings.local.json
+
+# Client keys written by `sapi clients add --print-env`
+*.env

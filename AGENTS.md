@@ -31,8 +31,14 @@ bun run ari42        # ARI-42 gate (report mode until the 0.1 release)
 
 ## Where things are
 
-- `src/` gateway code (Phase 1+), `test/` tests and fixtures, `scripts/phase0/` probes used to verify
-  the plan's assumptions, `docs/` findings and design notes.
+- `src/` gateway code: `server.ts` and `http-guards.ts` (HTTP surface), `gateway.ts` (request
+  pipeline), `auth.ts`, `budgets.ts`, `killswitch.ts`, `scheduler.ts`, `meter.ts` and `db.ts`
+  (policy and logs), `egress-proxy.ts` and `ssrf.ts` (outbound), `sandbox/` (launchers),
+  `providers/` (adapters and manifests), `prompts/` (versioned templates), `doors/` (API formats).
+- `test/unit/`, `test/security/` (ARI-42 security evals; never skip them in CI), `test/contract/`
+  (real SDKs against the fake provider), `test/fixtures/`.
+- `scripts/phase0/` probes used to verify the plan's assumptions, `docs/` findings and design notes.
+- Tests that start a gateway bind loopback ports; a sandboxed shell may need local binding allowed.
 - `ARI42.md` is the security record. Update it in the same change as the code it describes.
 
 <!-- ari42:start -->

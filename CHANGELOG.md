@@ -13,7 +13,22 @@ customers.
 ### Added
 - Phase 0 foundations: repository skeleton, community files, CI with pinned actions, ARI-42 record,
   Claude CLI probe scripts and sanitized stream fixtures.
+- Phase 1 secure core: `sapi start`, `sapi login claude`, `sapi status`, `sapi clients`,
+  `sapi pause`/`resume`. `POST /v1/chat/completions` (streamed and not), `GET /v1/models`,
+  `GET /healthz`. Host and Origin checks, body limits, security headers, scoped client keys stored
+  as hashes, per-key rate limits, daily budgets, concurrency caps, fair scheduling, kill switches,
+  and a hash-chained request and event log with no bodies.
+- Security suite in `test/security/` and contract tests with openai-node, openai-python and
+  LangChain. `scripts/e2e/real-claude.ts` runs the same SDKs against a real signed-in subscription.
 
 ### AI changes
-- None yet. Planned for 0.1: Claude subscription (through the `claude` CLI) and ChatGPT subscription
-  (through Sign in with ChatGPT).
+- Provider `claude-sub`: the Claude subscription through the unmodified `claude` CLI (tested
+  2.1.332), run with no tools and no MCP servers inside sandbox-exec (macOS) or bwrap / a systemd
+  user service (Linux). Outbound hosts: `api.anthropic.com`, `platform.claude.com`, `claude.ai`,
+  `claude.com`, through sapi's egress proxy only.
+- On macOS with CLI sign-in, the Claude child can also write `~/Library/Keychains` (through one link
+  in its otherwise empty per-request `HOME`): the CLI keeps its sign-in in the login keychain and
+  saves refreshed tokens there.
+- Default model aliases `haiku`, `sonnet`, `opus` → `claude-haiku-5-5`, `claude-sonnet-5-5`,
+  `claude-opus-5-5`.
+- Prompt template `transcript-v1` for multi-turn chats (single messages are passed unchanged).
