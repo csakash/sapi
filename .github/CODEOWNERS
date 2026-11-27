@@ -1,0 +1,21 @@
+# Every change needs a maintainer's review (ARI-42 SDLC-3).
+# TODO before the repository goes public: replace @YOUR_GITHUB_HANDLE with the real maintainer
+# handle(s) or a team, and enable "Require review from Code Owners" in branch protection.
+*                                   @YOUR_GITHUB_HANDLE
+
+# Agent configuration and security policy: owner review always (ARI-42 SDLC-4).
+/AGENTS.md                          @YOUR_GITHUB_HANDLE
+/CLAUDE.md                          @YOUR_GITHUB_HANDLE
+/.claude/                           @YOUR_GITHUB_HANDLE
+/.agents/                           @YOUR_GITHUB_HANDLE
+/ARI42.md                           @YOUR_GITHUB_HANDLE
+/SECURITY.md                        @YOUR_GITHUB_HANDLE
+/.github/                           @YOUR_GITHUB_HANDLE
+/.devcontainer/                     @YOUR_GITHUB_HANDLE
+/renovate.json                      @YOUR_GITHUB_HANDLE
+/bun.lock                           @YOUR_GITHUB_HANDLE
+/scripts/phase0/claude-child.sb     @YOUR_GITHUB_HANDLE
+# Planned paths (Phase 1+): prompt templates, provider manifests, sandbox launchers, installer.
+/src/prompts/                       @YOUR_GITHUB_HANDLE
+/src/providers/                     @YOUR_GITHUB_HANDLE
+/packaging/                         @YOUR_GITHUB_HANDLE

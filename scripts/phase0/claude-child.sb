@@ -1,0 +1,27 @@
+;; Phase 0 probe: macOS sandbox profile for the Claude child process (OUT-4, INJ-4).
+;; Parameters (pass with sandbox-exec -D NAME=value):
+;;   PROFILE   sapi's Claude profile directory (CLAUDE_CONFIG_DIR); the CLI may write here
+;;   WORKDIR   the per-request temp directory (cwd and HOME for the child)
+;;   PROXYPORT the port of sapi's egress proxy on 127.0.0.1
+;;   HOSTHOME  the real home directory, so secrets under it can be denied explicitly
+(version 1)
+(allow default)
+
+;; Network: nothing out except sapi's proxy on loopback. No direct DNS.
+(deny network-outbound)
+(allow network-outbound (remote ip (string-append "localhost:" (param "PROXYPORT"))))
+
+;; Files: writes only to the profile, the request's temp dir and the usual device files.
+(deny file-write*)
+(allow file-write*
+  (subpath (param "PROFILE"))
+  (subpath (param "WORKDIR"))
+  (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))
+
+;; Reads: deny the usual secret stores under the real home, even though nothing should look there.
+(deny file-read*
+  (subpath (string-append (param "HOSTHOME") "/.ssh"))
+  (subpath (string-append (param "HOSTHOME") "/.aws"))
+  (subpath (string-append (param "HOSTHOME") "/.config/gh"))
+  (subpath (string-append (param "HOSTHOME") "/.gnupg"))
+  (subpath (string-append (param "HOSTHOME") "/.config/sapi/secrets")))

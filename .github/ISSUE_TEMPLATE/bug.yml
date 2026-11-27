@@ -1,0 +1,34 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems:** don't file them here. Follow SECURITY.md and report privately.
+        Never paste API keys, sapi keys, tokens or prompt content into an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: Commands you ran, the client or SDK you used, the request (with secrets removed).
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `sapi doctor`
+      description: Remove anything you don't want public.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: sapi version (`sapi --version`) and OS
+    validations:
+      required: true

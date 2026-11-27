@@ -1,0 +1,13 @@
+{
+  "name": "sapi",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "bun",
+  "runArgs": ["--cap-drop=ALL", "--security-opt=no-new-privileges"],
+  "containerEnv": {},
+  "postCreateCommand": "bun install --frozen-lockfile",
+  "customizations": {
+    "vscode": {
+      "extensions": ["biomejs.biome"]
+    }
+  }
+}

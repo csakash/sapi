@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        sapi stays single-user and local. Requests for team mode, account pooling, hosting sapi for
+        other people or anything that handles Claude login tokens will be closed (see GOVERNANCE.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Does this widen what sapi can reach (hosts, files, tools) or who can call it?

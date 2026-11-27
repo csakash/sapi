@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, types, tests, binary (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install (lockfile must match)
+        run: bun install --frozen-lockfile
+
+      - name: Lint and format
+        run: bunx biome ci .
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      # Includes test/unit/repo-policy.test.ts: no permission-bypass flags, locked-down workflows,
+      # pinned dependencies (ARI-42 SDLC-2, SDLC-5, SDLC-6, GW-2).
+      - name: Tests
+        run: bun test
+
+      - name: Compile a standalone binary for this runner
+        run: |
+          bun build src/cli.ts --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile dist/sapi
+          ./dist/sapi --version
+
+  dco:
+    name: Developer Certificate of Origin
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Every commit is signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=$(git log --format='%H%x09%(trailers:key=Signed-off-by,valueonly,separator=%x2C)' "$BASE..$HEAD" | awk -F'\t' '$2 == "" { print $1 }')
+          if [ -n "$missing" ]; then
+            echo "These commits have no Signed-off-by line (use git commit -s):" >&2
+            echo "$missing" >&2
+            exit 1
+          fi

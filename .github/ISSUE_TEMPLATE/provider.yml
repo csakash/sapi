@@ -1,0 +1,33 @@
+name: New provider request
+description: Ask for a model provider to be supported.
+labels: [provider]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: e.g. Google Gemini API, OpenRouter, a local OpenAI-compatible server
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: How you'd connect to it
+      options:
+        - API key
+        - Cloud credentials (Bedrock, Vertex, Azure)
+        - Local server (no key)
+        - Subscription sign-in
+    validations:
+      required: true
+  - type: textarea
+    id: terms
+    attributes:
+      label: Provider terms
+      description: Link the terms that allow a local tool like sapi to use it this way.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why you need it
