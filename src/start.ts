@@ -26,16 +26,70 @@ export function refuseRoot(): void {
   }
 }
 
-/** How to start this same program as the egress bridge inside a Linux sandbox. */
-export function bridgeCommand(): { command: string[]; readOnly: string[] } {
-  const compiled = import.meta.path.startsWith("/$bunfs/") || import.meta.path.startsWith("B:/~BUN/");
-  if (compiled) return { command: [process.execPath, "__egress-bridge"], readOnly: [process.execPath] };
-  const cli = join(import.meta.dir, "cli.ts");
+/** True when running as the compiled single-file binary rather than from source. */
+export function isCompiled(): boolean {
+  return import.meta.path.startsWith("/$bunfs/") || import.meta.path.startsWith("B:/~BUN/");
+}
+
+/**
+ * How to start this same program: the binary itself, or bun plus `src/cli.ts` when running from
+ * source. Used for the egress bridge and for the background service.
+ */
+export function selfCommand(): { argv: string[]; readOnly: string[] } {
+  if (isCompiled()) return { argv: [process.execPath], readOnly: [process.execPath] };
   // Running from source: bun itself plus the source tree and its node_modules.
   return {
-    command: [process.execPath, cli, "__egress-bridge"],
+    argv: [process.execPath, join(import.meta.dir, "cli.ts")],
     readOnly: [process.execPath, resolve(dirname(import.meta.dir))],
   };
+}
+
+/** How to start this same program as the egress bridge inside a Linux sandbox. */
+export function bridgeCommand(): { command: string[]; readOnly: string[] } {
+  const self = selfCommand();
+  return { command: [...self.argv, "__egress-bridge"], readOnly: self.readOnly };
+}
+
+/** Whether any configured model alias sends traffic to the Claude subscription. */
+export function usesClaude(cfg: Config): boolean {
+  return Object.values(cfg.models).some((m) => "provider" in m && m.provider === "claude-sub");
+}
+
+/**
+ * The Claude adapter as the gateway builds it. `doctor` and `setup` use it too, so that the
+ * sign-in check runs exactly the way a real request does (same HOME, same profile).
+ */
+export function claudeAdapterFor(
+  paths: Paths,
+  cfg: Config,
+  o: {
+    launcher: Launcher;
+    launcherProblem?: string;
+    egress: { tcpPort: number; socketPath: string };
+    runDir: string;
+    onEvent?: (kind: string, detail: Record<string, unknown>) => void;
+  },
+): ClaudeAdapter {
+  const bridge = bridgeCommand();
+  return new ClaudeAdapter({
+    binary: cfg.claude.binary,
+    versionRange: cfg.claude.version_range,
+    auth: cfg.claude.auth,
+    launcher: o.launcher,
+    ...(o.launcherProblem ? { launcherProblem: o.launcherProblem } : {}),
+    profileDir: paths.claudeProfileDir,
+    runDir: o.runDir,
+    claudeEnvFile: paths.claudeEnvFile,
+    hostHome: paths.home,
+    hiddenPaths: [ensurePrivateDir(paths.dataDir), ensurePrivateDir(paths.configDir)],
+    egress: o.egress,
+    bridgeCommand: bridge.command,
+    bridgeReadOnlyPaths: bridge.readOnly,
+    memoryMaxMb: cfg.claude.memory_max_mb,
+    firstTokenTimeoutMs: cfg.claude.first_token_timeout_s * 1000,
+    totalTimeoutMs: cfg.claude.total_timeout_s * 1000,
+    ...(o.onEvent ? { onEvent: o.onEvent } : {}),
+  });
 }
 
 export type StartOptions = {
@@ -103,25 +157,12 @@ export async function startGateway(o: StartOptions): Promise<Running> {
     }
   }
 
-  const bridge = bridgeCommand();
   const adapters = new Map<ProviderId, ProviderAdapter>();
-  const claude = new ClaudeAdapter({
-    binary: cfg.claude.binary,
-    versionRange: cfg.claude.version_range,
-    auth: cfg.claude.auth,
+  const claude = claudeAdapterFor(paths, cfg, {
     launcher: launcher ?? noLauncher,
     ...(launcherProblem ? { launcherProblem } : {}),
-    profileDir: paths.claudeProfileDir,
-    runDir,
-    claudeEnvFile: paths.claudeEnvFile,
-    hostHome: paths.home,
-    hiddenPaths: [ensurePrivateDir(paths.dataDir), ensurePrivateDir(paths.configDir)],
     egress: { tcpPort, socketPath },
-    bridgeCommand: bridge.command,
-    bridgeReadOnlyPaths: bridge.readOnly,
-    memoryMaxMb: cfg.claude.memory_max_mb,
-    firstTokenTimeoutMs: cfg.claude.first_token_timeout_s * 1000,
-    totalTimeoutMs: cfg.claude.total_timeout_s * 1000,
+    runDir,
     onEvent: (kind, detail) => recordEvent(db, kind, detail),
   });
   adapters.set("claude-sub", claude);

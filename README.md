@@ -5,29 +5,30 @@ and ChatGPT subscriptions. Point your app's `base_url` at `http://127.0.0.1:8787
 key, and sapi routes the call to the right subscription, then shows which app used what and how
 close you are to each limit.
 
-> **Status: Phase 1 (secure core).** Text chat through your Claude subscription works from source
-> on macOS; Linux confinement is written and runs in CI. Guided setup, the background service,
-> ChatGPT and the dashboard come in later phases. Notes: [Phase 0](docs/phase0-findings.md),
-> [Phase 1](docs/phase1-notes.md).
+> **Status: Phase 2 (setup and onboarding).** Text chat through your Claude subscription works on
+> macOS, with guided setup, a background service, `doctor`, `connect` and `uninstall`. There are
+> no published binaries yet. ChatGPT and the dashboard come in later phases. Notes:
+> [Phase 0](docs/phase0-findings.md), [Phase 1](docs/phase1-notes.md),
+> [Phase 2](docs/phase2-notes.md).
 
-## Try it from source (Phase 1)
+## Try it from source
 
 ```bash
 bun install --frozen-lockfile
-bun src/cli.ts login claude          # signs in a separate Claude profile that only sapi uses
-bun src/cli.ts clients add my-app    # prints a key once
-bun src/cli.ts start                 # 127.0.0.1:8787
+bun src/cli.ts setup     # checks, Claude sign-in, a test call, your first key, the background service
 ```
 
-Then point any OpenAI-compatible client at it:
+Setup ends with the two lines your apps need:
 
 ```bash
 export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
-export OPENAI_API_KEY=sk-sapi-…      # the key from clients add
+export OPENAI_API_KEY=sk-sapi-…      # shown once
 ```
 
-Models are aliases from the config (`haiku`, `sonnet`, `opus` by default). `bun src/cli.ts status`
-shows the sandbox in use, the Claude sign-in, kill switches and log integrity.
+Then `sapi doctor` checks everything (each problem with its fix), and `sapi connect my-app` prints
+copy-paste setup for curl, OpenAI Python and Node, LangChain and the Vercel AI SDK. Models are
+aliases from the config (`haiku`, `sonnet`, `opus` by default). On a Linux VM, see
+[docs/vm-setup.md](docs/vm-setup.md).
 
 To check the whole path against your subscription (about eight tiny Haiku calls through
 openai-node, and openai-python and LangChain if installed):
@@ -64,7 +65,7 @@ sapi is not affiliated with Anthropic or OpenAI. Their names describe compatibil
 
 ## Security
 
-sapi is built to the [ARI-42](ARI42.md) agent-security requirements, checked in CI:
+sapi is built to the [ARI-42](ARI42.md) agent-security requirements, checked by `bun run ci`:
 
 - Listens on `127.0.0.1` only, requires a key for every client, and rejects requests from web pages.
 - No telemetry. sapi never phones home.
@@ -80,7 +81,7 @@ container in `.devcontainer/`.
 
 ```bash
 bun install --frozen-lockfile
-bun run check
+bun run ci
 ```
 
 ## License

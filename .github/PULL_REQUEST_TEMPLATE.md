@@ -26,5 +26,5 @@
 
 ## Checklist
 
-- [ ] `bun run check` passes
+- [ ] `bun run ci` passes
 - [ ] Commits are signed off (`git commit -s`)

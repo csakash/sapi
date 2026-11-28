@@ -15,7 +15,11 @@
 /renovate.json                      @YOUR_GITHUB_HANDLE
 /bun.lock                           @YOUR_GITHUB_HANDLE
 /scripts/phase0/claude-child.sb     @YOUR_GITHUB_HANDLE
-# Planned paths (Phase 1+): prompt templates, provider manifests, sandbox launchers, installer.
+# Prompt templates, provider manifests, sandbox launchers, the installer and the service files.
 /src/prompts/                       @YOUR_GITHUB_HANDLE
 /src/providers/                     @YOUR_GITHUB_HANDLE
+/src/sandbox/                       @YOUR_GITHUB_HANDLE
+/src/setup/service.ts               @YOUR_GITHUB_HANDLE
+/src/setup/claude.ts                @YOUR_GITHUB_HANDLE
+/scripts/install.sh                 @YOUR_GITHUB_HANDLE
 /packaging/                         @YOUR_GITHUB_HANDLE

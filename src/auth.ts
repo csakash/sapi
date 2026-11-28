@@ -148,6 +148,16 @@ export function setClientDisabled(db: Db, name: string, disabled: boolean): void
   recordEvent(db, disabled ? "client_disabled" : "client_enabled", { client: c.id });
 }
 
+/** When the client's current key was issued: creation, or the latest rotation. */
+export function keyIssuedAt(db: Db, c: Client): number {
+  const r = db
+    .query(
+      "SELECT MAX(at) AS at FROM events WHERE kind = 'client_key_rotated' AND json_extract(detail_json, '$.client') = ?",
+    )
+    .get(c.id) as { at: number | null } | null;
+  return Math.max(c.createdAt, r?.at ?? 0);
+}
+
 export function getClient(db: Db, id: string): Client | null {
   const r = db.query("SELECT * FROM clients WHERE id = ?").get(id) as ClientRow | null;
   return r ? toClient(r) : null;

@@ -12,6 +12,7 @@ version in `.bun-version`.
 bun install --frozen-lockfile   # lockfile changes must be deliberate
 bun run check                   # lint, typecheck, tests
 bun run ari42                   # ARI-42 gate in report mode
+bun run ci                      # all of the above and more: run it before you push
 ```
 
 Never put real provider logins, API keys or customer data in the dev container or the repo.
@@ -38,7 +39,7 @@ the right to submit it under the project's license.
 git commit -s -m "Add the thing"
 ```
 
-CI checks for the `Signed-off-by:` line.
+`bun run ci` checks for the `Signed-off-by:` line. sapi has no hosted CI, so reviewers run it too.
 
 ## AI-assisted contributions
 
