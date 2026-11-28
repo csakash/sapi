@@ -38,10 +38,15 @@ bun run ci           # everything that must pass before a push (there is no host
   `providers/` (adapters and manifests), `prompts/` (versioned templates), `doors/` (API formats),
   `setup/` (setup, doctor, connect, uninstall, the launchd and systemd service, the Claude
   installer hand-off).
+- `src/secrets.ts` (where provider sign-ins live), `src/egress-fetch.ts` (sapi's own outbound
+  calls), `src/doors/` (one file per API format, sharing `types.ts`), `src/providers/chatgpt-sub/`
+  (Sign in with ChatGPT and the Responses API).
 - `test/unit/`, `test/security/` (ARI-42 security evals; never skip them: `bun run ci` refuses to), `test/contract/`
-  (real SDKs against the fake provider), `test/fixtures/`.
+  (real SDKs against the fake provider and a fake OpenAI), `test/fixtures/` (`fake-openai.ts`).
+- Never read, log or print the ChatGPT tokens; they live only in the secret store, and tests use
+  `test/fixtures/fake-openai.ts` instead of a real account.
 - `scripts/install.sh` (checksum-verifying installer), `scripts/build-release.ts`,
-  `scripts/e2e/real-claude.ts` (end-to-end against a real subscription), `scripts/phase0/` probes,
+  `scripts/e2e/real-claude.ts` and `real-chatgpt.ts` (end-to-end against a real subscription), `scripts/phase0/` probes,
   `docs/` findings and design notes.
 - Tests that start a gateway bind loopback ports; a sandboxed shell may need local binding allowed.
 - `ARI42.md` is the security record. Update it in the same change as the code it describes.

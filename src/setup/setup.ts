@@ -16,9 +16,15 @@ import { createInterface } from "node:readline/promises";
 import { createClient, findClientByName, rotateClientKey, setClientDisabled } from "../auth.ts";
 import { type Config, DEFAULT_MODELS, listenAddress, loadConfig, parseConfig } from "../config.ts";
 import { openDb } from "../db.ts";
+import { openEgress } from "../egress-fetch.ts";
 import { ensurePrivateDir, type Paths } from "../paths.ts";
+import { planModels } from "../providers/chatgpt-sub/adapter.ts";
+import { loginChatGpt } from "../providers/chatgpt-sub/login.ts";
+import { chatgptManifest } from "../providers/chatgpt-sub/manifest.ts";
+import { parseSession, SESSION_SECRET, sessionState } from "../providers/chatgpt-sub/session.ts";
 import { detectLauncher, noLauncher } from "../sandbox/launchers.ts";
-import { claudeAdapterFor, type Running, startGateway, usesClaude } from "../start.ts";
+import { openSecretStore } from "../secrets.ts";
+import { claudeAdapterFor, type Running, startGateway, usesChatGpt, usesClaude } from "../start.ts";
 import {
   claudeLogin,
   claudeVersion,
@@ -31,7 +37,7 @@ import { absolutePaths, Service, serviceSpecFor } from "./context.ts";
 import { describeMachine, detectMachine, isSapiHealthy, type Machine, portState, waitHealthy } from "./machine.ts";
 import type { ServiceDeps } from "./service.ts";
 
-export const SETUP_PROVIDERS = ["claude-sub", "fake"] as const;
+export const SETUP_PROVIDERS = ["claude-sub", "chatgpt-sub", "fake"] as const;
 export type SetupProvider = (typeof SETUP_PROVIDERS)[number];
 /** Internal client used for the self-test; names starting with "sapi-" are reserved. */
 export const SELFTEST_CLIENT = "sapi-selftest";
@@ -92,6 +98,10 @@ export type SetupDeps = {
   claudeVersion?: (bin: string, paths: Paths) => string | null;
   claudeSignedIn?: (paths: Paths, cfg: Config) => Promise<boolean>;
   claudeLogin?: (bin: string, paths: Paths) => boolean;
+  /** The plan's models when signed in to ChatGPT already, else null. */
+  chatgptSignedIn?: (paths: Paths, cfg: Config) => Promise<string[] | null>;
+  /** Run the ChatGPT browser sign-in; returns the plan's models. */
+  chatgptLogin?: (paths: Paths, cfg: Config, headless: boolean, say: (l: string) => void) => Promise<string[]>;
   installClaude?: (paths: Paths, info: (l: string) => void) => Promise<string>;
 };
 
@@ -107,8 +117,11 @@ export function configTemplate(o: {
   providers: SetupProvider[];
   claudeBinary: string | null;
   claudeAuth: "cli" | "env";
+  /** A model the ChatGPT plan offers, for the `gpt` alias. */
+  chatgptModel?: string | null;
 }): string {
   const claude = o.providers.includes("claude-sub");
+  const chatgpt = o.providers.includes("chatgpt-sub");
   const lines = [
     "# sapi configuration. After editing, restart sapi: sapi stop && sapi start",
     "# sapi listens on loopback only and refuses other addresses.",
@@ -124,12 +137,26 @@ export function configTemplate(o: {
       "",
     );
   }
-  if (o.providers.includes("fake")) {
+  if (o.providers.includes("fake") || chatgpt) {
     lines.push("[models]", "# alias = { provider, model }: clients ask for the alias, sapi sends the pinned ID.");
     if (claude)
       for (const [alias, m] of Object.entries(DEFAULT_MODELS))
         lines.push(`${alias} = { provider = ${tomlString(m.provider)}, model = ${tomlString(m.model)} }`);
-    lines.push('echo = { provider = "fake", model = "fake-echo-1" }   # test provider: replies "echo: <message>"', "");
+    if (chatgpt && o.chatgptModel) {
+      lines.push(`gpt = { provider = "chatgpt-sub", model = ${tomlString(o.chatgptModel)} }`);
+      if (claude)
+        lines.push(
+          '# "auto" uses sonnet until its window passes 90%, then gpt. Explicit aliases never fall back.',
+          'auto = { route = ["sonnet", "gpt"], switch_at_window_pct = 90 }',
+        );
+    } else if (chatgpt) {
+      lines.push(
+        '# gpt = { provider = "chatgpt-sub", model = "<a model your plan offers: sapi login chatgpt lists them>" }',
+      );
+    }
+    if (o.providers.includes("fake"))
+      lines.push('echo = { provider = "fake", model = "fake-echo-1" }   # test provider: replies "echo: <message>"');
+    lines.push("");
   } else {
     lines.push(
       "# Model aliases default to haiku, sonnet and opus (pinned IDs). To change them:",
@@ -251,7 +278,36 @@ async function claudeSignedIn(paths: Paths, cfg: Config): Promise<boolean> {
   return r.ready;
 }
 
-const PROVIDER_NAME: Record<SetupProvider, string> = { "claude-sub": "Claude", fake: "Test provider" };
+const PROVIDER_NAME: Record<SetupProvider, string> = {
+  "claude-sub": "Claude",
+  "chatgpt-sub": "ChatGPT",
+  fake: "Test provider",
+};
+
+/** The plan's models if sapi is signed in to ChatGPT already (no refresh), else null. */
+async function chatgptSignedIn(paths: Paths, cfg: Config): Promise<string[] | null> {
+  const store = await openSecretStore(paths, cfg.secrets.backend);
+  const st = sessionState(parseSession(await store.get(SESSION_SECRET)));
+  if (!st.ok) return null;
+  if (st.session.expires_at < Date.now() + 60_000) return [];
+  const egress = await openEgress(chatgptManifest.egressHosts);
+  try {
+    return (await planModels(egress.fetch, st.session.access_token).catch(() => [])).map((m) => m.slug);
+  } finally {
+    await egress.close();
+  }
+}
+
+async function chatgptLogin(paths: Paths, cfg: Config, headless: boolean, say: (l: string) => void): Promise<string[]> {
+  const store = await openSecretStore(paths, cfg.secrets.backend);
+  const egress = await openEgress(chatgptManifest.egressHosts);
+  try {
+    const r = await loginChatGpt({ paths, fetch: egress.fetch, store, ssh: headless, print: (l) => say(`   ${l}`) });
+    return r.models.map((m) => m.slug);
+  } finally {
+    await egress.close();
+  }
+}
 
 export async function runSetup(rawPaths: Paths, o: SetupOptions, io: SetupIo, deps: SetupDeps = {}): Promise<number> {
   const paths = absolutePaths(rawPaths);
@@ -346,17 +402,64 @@ export async function runSetup(rawPaths: Paths, o: SetupOptions, io: SetupIo, de
     }
   }
 
+  // ChatGPT sign-in comes before the config, which needs one of the plan's models.
+  const wantsChatGpt = providers.includes("chatgpt-sub");
+  let chatgptReady = false;
+  let chatgptModels: string[] = [];
+  if (wantsChatGpt) {
+    io.info("\nChatGPT");
+    try {
+      const already = await (deps.chatgptSignedIn ?? chatgptSignedIn)(paths, existing);
+      if (already) {
+        chatgptReady = true;
+        chatgptModels = already;
+        ok("signed in (Sign in with ChatGPT)");
+      } else if (io.interactive) {
+        io.info(
+          machine.headless
+            ? " → sapi prints an ssh tunnel command and a link: run the command on your laptop, then open the link there."
+            : " → Your browser opens OpenAI's sign-in page; approve there.",
+        );
+        chatgptModels = await (deps.chatgptLogin ?? chatgptLogin)(paths, existing, machine.headless, io.info);
+        chatgptReady = true;
+        ok("signed in (Sign in with ChatGPT)");
+      } else {
+        warn("not signed in yet (that needs you at a browser)");
+        left.push("sign in: sapi login chatgpt");
+      }
+    } catch (e) {
+      bad((e as Error).message);
+      left.push("sign in: sapi login chatgpt");
+    }
+    if (chatgptModels.length) ok(`your plan offers: ${chatgptModels.join(", ")}`);
+    io.info(
+      " ! sapi can't see ChatGPT's \"Improve the model for everyone\" setting. Check it once in ChatGPT's data controls.",
+    );
+  }
+
   // 3. Config (written once; never overwritten).
   io.info("\nConfig");
   if (configExists) ok(`kept your config: ${paths.configFile}`);
   else {
-    const text = configTemplate({ port: effectivePort, providers, claudeBinary: claudeBin, claudeAuth: auth });
+    const text = configTemplate({
+      port: effectivePort,
+      providers,
+      claudeBinary: claudeBin,
+      claudeAuth: auth,
+      chatgptModel: chatgptModels[0] ?? null,
+    });
     parseConfig(Bun.TOML.parse(text)); // never write a config sapi itself would reject
     writePrivateFile(paths.configFile, text);
     ok(`wrote ${paths.configFile}`);
   }
   const cfg = loadConfig(paths.configFile);
   if (wantsClaude && !usesClaude(cfg)) warn("your config has no model alias for Claude, so Claude won't be used");
+  if (wantsChatGpt && !usesChatGpt(cfg)) {
+    warn("your config has no model alias for ChatGPT, so ChatGPT won't be used");
+    left.push(
+      `add a ChatGPT alias under [models] in ${paths.configFile}, e.g. gpt = { provider = "chatgpt-sub", model = "${chatgptModels[0] ?? "<model>"}" }`,
+    );
+  }
 
   // Claude sign-in, now that the config names the binary.
   if (wantsClaude && claudeBin) {
@@ -389,7 +492,9 @@ export async function runSetup(rawPaths: Paths, o: SetupOptions, io: SetupIo, de
   }
 
   // 4. Test calls.
-  const testable = providers.filter((p) => p !== "claude-sub" || claudeReady);
+  const testable = providers.filter(
+    (p) => (p !== "claude-sub" || claudeReady) && (p !== "chatgpt-sub" || (chatgptReady && usesChatGpt(cfg))),
+  );
   if (testable.length) {
     const run =
       o.selfTest ?? (await io.confirm(`\nTest call${testable.length > 1 ? "s" : ""} (uses a few tokens)?`, true));

@@ -1,7 +1,8 @@
 /**
  * `sapi uninstall [--purge]` (plan §5): removes the service and the binary. `--purge` also signs
  * sapi's Claude profile out (on macOS that removes its keychain entry, which deleting the folder
- * alone would leave behind) and deletes sapi's config, data and temporary folders.
+ * alone would leave behind), revokes and deletes the ChatGPT sign-in (which may live in the OS
+ * secret store), and deletes sapi's config, data and temporary folders.
  *
  * Deletion is guarded: only folders that are recognisably sapi's are removed, never the home
  * folder, a filesystem root or a shallow system path, and the user confirms unless --yes.
@@ -10,7 +11,12 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve, sep } from "node:path";
 import { loadConfig, parseConfig } from "../config.ts";
+import { openEgress } from "../egress-fetch.ts";
 import type { Paths } from "../paths.ts";
+import { logoutChatGpt } from "../providers/chatgpt-sub/login.ts";
+import { chatgptManifest } from "../providers/chatgpt-sub/manifest.ts";
+import { hostFilePath } from "../providers/chatgpt-sub/session.ts";
+import { openSecretStore } from "../secrets.ts";
 import { isCompiled } from "../start.ts";
 import { claudeLogout, claudeProfileSignedIn, findClaude } from "./claude.ts";
 import { absolutePaths, Service, serviceSpecFor } from "./context.ts";
@@ -18,7 +24,7 @@ import { detectMachine, type Machine } from "./machine.ts";
 import type { ServiceDeps } from "./service.ts";
 import type { SetupIo } from "./setup.ts";
 
-const MARKERS = ["sapi.db", "config.toml", "claude-profile", "claude.env"];
+const MARKERS = ["sapi.db", "config.toml", "claude-profile", "claude.env", "chatgpt-host.json", "secrets-backend"];
 
 /** Why a folder must not be deleted, or null when it is safe to remove as sapi's. */
 export function unsafeToDelete(dir: string, home = homedir()): string | null {
@@ -46,6 +52,7 @@ export type UninstallDeps = {
   binary?: string | null;
   logout?: (bin: string, paths: Paths) => boolean;
   signedIn?: (bin: string, paths: Paths) => boolean;
+  chatgptLogout?: () => Promise<{ hadSession: boolean; revoked: boolean }>;
 };
 
 export async function runUninstall(
@@ -116,6 +123,28 @@ export async function runUninstall(
       bad("couldn't sign sapi's Claude profile out. Remove its keychain entry or token yourself if one remains.");
       failed = true;
     }
+  }
+  // ChatGPT: only when sapi was ever signed in here (the host file is written before any sign-in).
+  if (existsSync(hostFilePath(paths))) {
+    const logout =
+      deps.chatgptLogout ??
+      (async () => {
+        const store = await openSecretStore(paths, cfg.secrets.backend);
+        const egress = await openEgress(chatgptManifest.egressHosts);
+        try {
+          return await logoutChatGpt({ store, fetch: egress.fetch });
+        } finally {
+          await egress.close();
+        }
+      });
+    const r = await logout().catch(() => null);
+    if (!r) {
+      bad("couldn't open the secret store to remove the ChatGPT sign-in. Disconnect sapi in ChatGPT's settings.");
+      failed = true;
+    } else if (!r.hadSession) ok("sapi wasn't signed in to ChatGPT");
+    else if (r.revoked) ok("signed sapi out of ChatGPT (revoked at OpenAI)");
+    else
+      ok("deleted the ChatGPT sign-in; OpenAI didn't confirm the revocation, so disconnect sapi in ChatGPT's settings");
   }
   for (const d of dirs) {
     try {

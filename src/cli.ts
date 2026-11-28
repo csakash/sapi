@@ -4,6 +4,7 @@
  *
  * Phase 1: start, clients, pause/resume, login claude, status.
  * Phase 2: setup, doctor, connect, service install/uninstall, stop, uninstall.
+ * Phase 3: login chatgpt (desktop, --ssh, --export/--import), logout chatgpt.
  */
 import { spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
@@ -22,6 +23,7 @@ import { openDb } from "./db.ts";
 import { pausedSwitches, type SwitchTarget, setPaused } from "./killswitch.ts";
 import { verifyLogs } from "./meter.ts";
 import { ensurePrivateDir, resolvePaths } from "./paths.ts";
+import { chatgptStatusLine, loginChatGptCmd, logoutChatGptCmd } from "./providers/chatgpt-sub/cli.ts";
 import { claudeChildEnv } from "./providers/claude-sub/spawn.ts";
 import { detectLauncher } from "./sandbox/launchers.ts";
 import { claudeLogin, findClaude } from "./setup/claude.ts";
@@ -42,10 +44,10 @@ Getting started:
   setup                            Guided setup: checks, Claude sign-in, test call, first key, service
       --yes                        Accept every default (unattended); also --no-service, --no-self-test,
                                    --no-install-claude, --client NAME, --env-file FILE, --print-env,
-                                   --port N, --claude-auth cli|env
+                                   --port N, --claude-auth cli|env, --providers claude-sub,chatgpt-sub
   doctor [--json] [--offline]      Check everything; each problem comes with a fix
   connect <client> [--tool T] [--new-key]
-                                   Copy-paste setup for curl, Python, Node, LangChain, Vercel AI SDK
+                                   Copy-paste setup for curl, Python, Node, LangChain, Vercel AI SDK, Anthropic
 
 Running:
   start [--foreground] [--port N]  Start the background service, or run here (127.0.0.1:8787)
@@ -53,10 +55,14 @@ Running:
   status                           Config, sandbox, Claude sign-in, service, clients, kill switches, logs
   service install|uninstall|status The background service (launchd agent or systemd user unit)
   login claude                     Sign in sapi's own Claude profile (your normal claude setup is untouched)
+  login chatgpt [--ssh] [--port N] Sign in with ChatGPT in the browser; --ssh prints a tunnel for a VM
+      --export FILE|-  --import FILE|-   Sign in on a laptop, then move the sign-in to a VM
+      --register                   Start a new registration (another account or workspace)
+  logout chatgpt                   Revoke and delete the ChatGPT sign-in
 
 Clients and limits:
   clients add <name> [options]     Create a client key (shown once)
-      --models a,b  --providers claude-sub  --expires 90d
+      --models a,b  --providers claude-sub,chatgpt-sub  --expires 90d
       --rpm N  --requests-per-day N  --tokens-per-day N  --max-concurrency N  --print-env
   clients list                     Keys are shown by prefix only
   clients disable|enable <name>
@@ -211,7 +217,7 @@ function pause(args: string[], paused: boolean): Out {
   }
 }
 
-function status(): Out {
+async function status(): Promise<Out> {
   const { paths, cfg } = ctx();
   const lines = [
     `sapi ${VERSION}`,
@@ -240,6 +246,7 @@ function status(): Out {
       `claude       ${(v.stdout ?? "").trim().split(/\s/)[0] || "unknown version"} · ${s.status === 0 ? "signed in (sapi profile)" : "not signed in: run sapi login claude"}`,
     );
   }
+  lines.push(await chatgptStatusLine(paths, cfg));
   const machine = detectMachine();
   const spec = serviceSpecFor(paths, cfg, machine);
   lines.push(
@@ -450,7 +457,7 @@ export async function run(argv: string[]): Promise<Out> {
     if (cmd === "clients") return clients(rest);
     if (cmd === "pause") return pause(rest, true);
     if (cmd === "resume") return pause(rest, false);
-    if (cmd === "status") return status();
+    if (cmd === "status") return await status();
     if (cmd === "doctor") return await doctorCmd(rest);
     if (cmd === "connect") return connectCmd(rest);
     if (cmd === "service") return await serviceCmd(rest);
@@ -461,7 +468,7 @@ export async function run(argv: string[]): Promise<Out> {
   } catch (e) {
     return { code: 1, out: `sapi: ${(e as Error).message}` };
   }
-  if (["stats", "export", "purge", "eval", "providers", "logout"].includes(cmd)) {
+  if (["stats", "export", "purge", "eval", "providers"].includes(cmd)) {
     return { code: 2, out: `sapi: "${cmd}" is planned for a later phase and not implemented yet.` };
   }
   return { code: 2, out: `sapi: unknown command "${cmd.slice(0, 40)}". Run sapi --help.` };
@@ -473,13 +480,21 @@ async function main(): Promise<void> {
     const { runBridge } = await import("./sandbox/bridge.ts");
     process.exit(await runBridge(rest));
   }
-  if (cmd === "login") {
-    if (rest[0] !== "claude") {
-      console.error("Usage: sapi login claude   (ChatGPT sign-in arrives in a later phase)");
-      process.exit(2);
+  if (cmd === "login" || cmd === "logout") {
+    const which = rest[0];
+    if (which === "claude" && cmd === "login") {
+      refuseRoot();
+      process.exit(loginClaude());
     }
-    refuseRoot();
-    process.exit(loginClaude());
+    if (which === "chatgpt") {
+      refuseRoot();
+      const { paths, cfg } = ctx();
+      process.exit(
+        cmd === "login" ? await loginChatGptCmd(rest.slice(1), paths, cfg) : await logoutChatGptCmd(paths, cfg),
+      );
+    }
+    console.error(cmd === "login" ? "Usage: sapi login claude | sapi login chatgpt" : "Usage: sapi logout chatgpt");
+    process.exit(2);
   }
   if (cmd === "start") {
     const { values: v } = parseArgs({

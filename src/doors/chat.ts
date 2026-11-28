@@ -10,6 +10,8 @@
 import { z } from "zod";
 import type { CanonicalEvent, CanonicalMessage, ErrorKind, FinishReason, Usage } from "../canonical.ts";
 import { GatewayError } from "../canonical.ts";
+import { invalidRequest, SSE_DONE, safeName, sse, unhandledParams } from "./common.ts";
+import type { Door, DoorMeta, ParsedRequest, StreamWriter } from "./types.ts";
 
 const TextPart = z.looseObject({ type: z.literal("text"), text: z.string() });
 const Content = z.union([z.string(), z.array(z.looseObject({ type: z.string() })), z.null()]);
@@ -75,18 +77,7 @@ const HANDLED = new Set([
   "modalities",
 ]);
 
-export type ParsedChat = {
-  alias: string;
-  system?: string;
-  messages: CanonicalMessage[];
-  stream: boolean;
-  includeUsage: boolean;
-  ignoredParams: string[];
-};
-
-function safeName(k: string): string {
-  return /^[A-Za-z0-9_.-]{1,64}$/.test(k) ? k : "(invalid-name)";
-}
+export type ParsedChat = ParsedRequest & { includeUsage: boolean };
 
 function textOf(content: z.infer<typeof Content> | undefined, where: string): string {
   if (content === undefined || content === null) return "";
@@ -110,13 +101,7 @@ function textOf(content: z.infer<typeof Content> | undefined, where: string): st
 
 export function parseChatRequest(body: unknown, strictParams: boolean): ParsedChat {
   const r = ChatRequest.safeParse(body);
-  if (!r.success) {
-    const first = r.error.issues[0];
-    const where = first?.path.map(String).map(safeName).join(".") || "body";
-    throw new GatewayError("bad_request", `Invalid request: ${where}: ${first?.message ?? "invalid"}`, {
-      param: where,
-    });
-  }
+  if (!r.success) throw invalidRequest(r.error);
   const req = r.data;
   if (req.n !== undefined && req.n !== null && req.n !== 1)
     throw new GatewayError("bad_request", "Only n = 1 is supported.", { param: "n" });
@@ -139,19 +124,7 @@ export function parseChatRequest(body: unknown, strictParams: boolean): ParsedCh
     throw new GatewayError("bad_request", "Hosted web search isn't supported.", { param: "web_search_options" });
   }
 
-  const unknownOrIgnored = Object.keys(body as object)
-    .filter((k) => !HANDLED.has(k) && (body as Record<string, unknown>)[k] !== null)
-    .map(safeName)
-    .sort();
-  if (strictParams && unknownOrIgnored.length > 0) {
-    throw new GatewayError(
-      "bad_request",
-      `strict_params is on and these parameters can't be honoured: ${unknownOrIgnored.join(", ")}`,
-      {
-        param: unknownOrIgnored[0]!,
-      },
-    );
-  }
+  const unknownOrIgnored = unhandledParams(body, HANDLED, strictParams);
 
   const systemParts: string[] = [];
   const messages: CanonicalMessage[] = [];
@@ -186,6 +159,12 @@ export function isIgnorable(name: string): boolean {
 }
 
 export type ChatMeta = { id: string; created: number; model: string };
+
+const chatMeta = (m: DoorMeta): ChatMeta => ({
+  id: `chatcmpl-${m.requestId.slice(4)}`,
+  created: m.created,
+  model: m.model,
+});
 
 function usageJson(u: Usage | undefined) {
   if (!u) return undefined;
@@ -224,13 +203,8 @@ function chunk(meta: ChatMeta, delta: Record<string, unknown>, finish: FinishRea
   };
 }
 
-const enc = new TextEncoder();
-export const sse = (obj: unknown) => enc.encode(`data: ${JSON.stringify(obj)}\n\n`);
-export const SSE_DONE = enc.encode("data: [DONE]\n\n");
-export const SSE_PING = enc.encode(": ping\n\n");
-
 /** Turns internal events into SSE frames for one streamed completion. */
-export class ChatStreamWriter {
+export class ChatStreamWriter implements StreamWriter {
   private started = false;
   private usage: Usage | undefined;
 
@@ -270,6 +244,10 @@ export class ChatStreamWriter {
     }
     return out;
   }
+
+  error(e: GatewayError): Uint8Array[] {
+    return [sse(openAiError(e))];
+  }
 }
 
 const OPENAI_TYPE: Partial<Record<ErrorKind, string>> = {
@@ -296,3 +274,11 @@ export function openAiError(e: GatewayError) {
     },
   };
 }
+
+export const chatDoor: Door = {
+  name: "chat",
+  parse: parseChatRequest,
+  complete: (meta, text, finish, usage) => completionJson(chatMeta(meta), text, finish, usage),
+  stream: (meta, parsed) => new ChatStreamWriter(chatMeta(meta), parsed.includeUsage === true),
+  errorBody: openAiError,
+};

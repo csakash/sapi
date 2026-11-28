@@ -8,15 +8,20 @@ import type { Server } from "bun";
 import type { Config, ProviderId } from "./config.ts";
 import { listenAddress } from "./config.ts";
 import { type Db, openDb, recordEvent } from "./db.ts";
+import { guardedFetch } from "./egress-fetch.ts";
 import { type EgressEvent, EgressProxy } from "./egress-proxy.ts";
 import { Gateway } from "./gateway.ts";
 import { ensurePrivateDir, type Paths } from "./paths.ts";
+import { ChatGptAdapter } from "./providers/chatgpt-sub/adapter.ts";
+import { chatgptManifest } from "./providers/chatgpt-sub/manifest.ts";
+import { ChatGptAuth } from "./providers/chatgpt-sub/session.ts";
 import { ClaudeAdapter } from "./providers/claude-sub/adapter.ts";
 import { claudeManifest } from "./providers/claude-sub/manifest.ts";
 import { FakeAdapter } from "./providers/fake/adapter.ts";
 import type { ProviderAdapter } from "./providers/types.ts";
 import { log } from "./redact.ts";
 import { detectLauncher, type Launcher, noLauncher } from "./sandbox/launchers.ts";
+import { openSecretStore } from "./secrets.ts";
 import { serve } from "./server.ts";
 import { VERSION } from "./version.ts";
 
@@ -53,6 +58,11 @@ export function bridgeCommand(): { command: string[]; readOnly: string[] } {
 /** Whether any configured model alias sends traffic to the Claude subscription. */
 export function usesClaude(cfg: Config): boolean {
   return Object.values(cfg.models).some((m) => "provider" in m && m.provider === "claude-sub");
+}
+
+/** Whether any configured model alias sends traffic to the ChatGPT subscription. */
+export function usesChatGpt(cfg: Config): boolean {
+  return Object.values(cfg.models).some((m) => "provider" in m && m.provider === "chatgpt-sub");
 }
 
 /**
@@ -108,7 +118,10 @@ export type Running = {
   server: Server<undefined>;
   gateway: Gateway;
   db: Db;
+  /** The Claude child's egress proxy. */
   proxy: EgressProxy;
+  /** The ChatGPT provider's egress proxy (sapi's own calls to OpenAI). */
+  chatgptProxy: EgressProxy;
   launcher: Launcher | null;
   stop: () => Promise<void>;
 };
@@ -127,16 +140,16 @@ export async function startGateway(o: StartOptions): Promise<Running> {
   const db = openDb(paths.dbFile);
 
   const egressThrottle = new Map<string, number>();
-  const onEgress = (e: EgressEvent) => {
+  const onEgress = (provider: string) => (e: EgressEvent) => {
     if (e.kind !== "egress_blocked") return;
-    const key = `${e.host}:${e.port}:${e.reason}`;
+    const key = `${provider}:${e.host}:${e.port}:${e.reason}`;
     const now = Date.now();
     if (now - (egressThrottle.get(key) ?? 0) < 60_000) return;
     egressThrottle.set(key, now);
-    recordEvent(db, "egress_blocked", { provider: "claude-sub", host: e.host, port: e.port, reason: e.reason ?? "" });
-    log("warn", "egress blocked", { host: e.host, port: e.port, reason: e.reason });
+    recordEvent(db, "egress_blocked", { provider, host: e.host, port: e.port, reason: e.reason ?? "" });
+    log("warn", "egress blocked", { provider, host: e.host, port: e.port, reason: e.reason });
   };
-  const proxy = new EgressProxy({ allow: claudeManifest.egressHosts, onEvent: onEgress });
+  const proxy = new EgressProxy({ allow: claudeManifest.egressHosts, onEvent: onEgress("claude-sub") });
   const tcpPort = await proxy.listenTcp();
   const socketPath = join(runDir, "egress-claude.sock");
   if (process.platform === "linux") await proxy.listenUnix(socketPath);
@@ -166,6 +179,17 @@ export async function startGateway(o: StartOptions): Promise<Running> {
     onEvent: (kind, detail) => recordEvent(db, kind, detail),
   });
   adapters.set("claude-sub", claude);
+
+  // ChatGPT: sapi calls OpenAI itself, through its own proxy with only OpenAI's two hosts.
+  const chatgptProxy = new EgressProxy({ allow: chatgptManifest.egressHosts, onEvent: onEgress("chatgpt-sub") });
+  const chatgptFetch = guardedFetch(chatgptManifest.egressHosts, `http://127.0.0.1:${await chatgptProxy.listenTcp()}`);
+  const events = (kind: string, detail: Record<string, unknown>) => recordEvent(db, kind, detail);
+  const chatgptAuth = new ChatGptAuth({
+    openStore: () => openSecretStore(paths, cfg.secrets.backend),
+    fetch: chatgptFetch,
+    onEvent: events,
+  });
+  adapters.set("chatgpt-sub", new ChatGptAdapter({ auth: chatgptAuth, fetch: chatgptFetch, onEvent: events }));
   adapters.set("fake", new FakeAdapter());
   for (const [id, a] of Object.entries(o.adapters ?? {})) if (a) adapters.set(id as ProviderId, a);
 
@@ -186,11 +210,13 @@ export async function startGateway(o: StartOptions): Promise<Running> {
     gateway,
     db,
     proxy,
+    chatgptProxy,
     launcher,
     stop: async () => {
       gateway.stop();
       server.stop(true);
       await proxy.close();
+      await chatgptProxy.close();
       for (const a of adapters.values()) await a.close?.();
       db.close();
     },

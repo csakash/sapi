@@ -14,9 +14,12 @@ import { EgressProxy } from "../egress-proxy.ts";
 import { pausedSwitches } from "../killswitch.ts";
 import { verifyLogs } from "../meter.ts";
 import type { Paths } from "../paths.ts";
+import { chatgptManifest } from "../providers/chatgpt-sub/manifest.ts";
+import { parseSession, SESSION_SECRET, sessionState } from "../providers/chatgpt-sub/session.ts";
 import { claudeManifest } from "../providers/claude-sub/manifest.ts";
 import { detectLauncher, type LauncherProbe, noLauncher } from "../sandbox/launchers.ts";
-import { claudeAdapterFor, isCompiled, usesClaude } from "../start.ts";
+import { openSecretStore, type SecretStore } from "../secrets.ts";
+import { claudeAdapterFor, isCompiled, usesChatGpt, usesClaude } from "../start.ts";
 import { Service, type ServiceState, serviceSpecFor } from "./context.ts";
 import { detectMachine, isSapiHealthy, type Machine, portState } from "./machine.ts";
 
@@ -30,8 +33,10 @@ export type DoctorOptions = {
   machine?: Machine;
   service?: Service | null;
   launcher?: LauncherProbe;
-  /** Tests: how to reach api.anthropic.com. */
+  /** Tests: how to reach api.anthropic.com and api.openai.com. */
   reach?: (host: string) => Promise<string | null>;
+  /** Tests: the secret store holding the ChatGPT sign-in. */
+  openStore?: () => Promise<SecretStore>;
   now?: number;
 };
 
@@ -53,9 +58,10 @@ function privateDirCheck(id: string, title: string, dir: string): Check {
   return { id, title, status: "ok", detail: `${dir} (private)` };
 }
 
-/** Resolve api.anthropic.com through the same checks the egress proxy applies, then open TCP 443. */
-async function reachAnthropic(host: string): Promise<string | null> {
-  const proxy = new EgressProxy({ allow: claudeManifest.egressHosts, onEvent: () => {} });
+/** Resolve a provider host through the same checks the egress proxy applies, then open TCP 443. */
+async function reachHost(host: string): Promise<string | null> {
+  const allow = [...claudeManifest.egressHosts, ...chatgptManifest.egressHosts];
+  const proxy = new EgressProxy({ allow, onEvent: () => {} });
   const d = await proxy.decide(`${host}:443`);
   if (!d.allow) return `the egress check refused it (${d.reason})`;
   return new Promise((resolve) => {
@@ -277,7 +283,7 @@ export async function runDoctor(o: DoctorOptions): Promise<Check[]> {
     );
     if (o.offline) out.push({ id: "egress", title: "Network to Anthropic", status: "skip", detail: "--offline" });
     else {
-      const err = await (o.reach ?? reachAnthropic)("api.anthropic.com");
+      const err = await (o.reach ?? reachHost)("api.anthropic.com");
       out.push(
         err
           ? {
@@ -288,6 +294,61 @@ export async function runDoctor(o: DoctorOptions): Promise<Check[]> {
               fix: "check this machine's internet connection, DNS and firewall",
             }
           : { id: "egress", title: "Network to Anthropic", status: "ok", detail: "api.anthropic.com:443 reachable" },
+      );
+    }
+  }
+
+  if (!cfg || !usesChatGpt(cfg)) {
+    out.push({
+      id: "chatgpt",
+      title: "ChatGPT",
+      status: "skip",
+      detail: "no model alias uses the ChatGPT subscription",
+    });
+  } else {
+    try {
+      const store = await (o.openStore ?? (() => openSecretStore(paths, cfg.secrets.backend)))();
+      const st = sessionState(parseSession(await store.get(SESSION_SECRET)), now);
+      out.push(
+        !st.ok
+          ? { id: "chatgpt", title: "ChatGPT", status: "fail", detail: st.reason, fix: st.fix }
+          : st.refreshTokenDaysLeft < 3
+            ? {
+                id: "chatgpt",
+                title: "ChatGPT",
+                status: "warn",
+                detail: `signed in (${store.backend} store), but the sign-in lapses in ${st.refreshTokenDaysLeft} days without use`,
+                fix: "send one request through a ChatGPT alias, or run sapi login chatgpt",
+              }
+            : {
+                id: "chatgpt",
+                title: "ChatGPT",
+                status: "ok",
+                detail: `signed in (${store.backend} store); renews on use, lapses after ${st.refreshTokenDaysLeft} idle days`,
+              },
+      );
+    } catch (e) {
+      out.push({
+        id: "chatgpt",
+        title: "ChatGPT",
+        status: "fail",
+        detail: `can't read the sign-in: ${(e as Error).message}`,
+        fix: "sapi login chatgpt",
+      });
+    }
+    if (o.offline) out.push({ id: "egress-openai", title: "Network to OpenAI", status: "skip", detail: "--offline" });
+    else {
+      const err = await (o.reach ?? reachHost)("api.openai.com");
+      out.push(
+        err
+          ? {
+              id: "egress-openai",
+              title: "Network to OpenAI",
+              status: "fail",
+              detail: `api.openai.com:443: ${err}`,
+              fix: "check this machine's internet connection, DNS and firewall",
+            }
+          : { id: "egress-openai", title: "Network to OpenAI", status: "ok", detail: "api.openai.com:443 reachable" },
       );
     }
   }
