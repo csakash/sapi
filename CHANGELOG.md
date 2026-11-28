@@ -26,6 +26,14 @@ customers.
   to `~/.local/bin` without root. `docs/vm-setup.md`.
 - Security suite in `test/security/` and contract tests with openai-node, openai-python and
   LangChain. `scripts/e2e/real-claude.ts` runs the same SDKs against a real signed-in subscription.
+- Phase 3: the ChatGPT subscription through Sign in with ChatGPT. `sapi login chatgpt` (browser,
+  `--ssh` tunnel for VMs, `--export`/`--import` to move a sign-in), `sapi logout chatgpt` (revokes
+  at OpenAI); ChatGPT in `setup`, `status`, `doctor` and `uninstall --purge`. A secret store for
+  provider sign-ins (Keychain or Secret Service, `systemd-creds`, or a 0600 file; `[secrets]
+  backend`). `POST /v1/responses` (OpenAI Responses, stateless) and `POST /v1/messages` (Anthropic
+  Messages), with errors in each caller's format. `auto` routing across providers; `[chatgpt]`
+  timeouts and concurrency. Contract tests with the Anthropic SDK and openai-node and -python
+  Responses.
 
 ### Removed
 - GitHub Actions workflows (CI, CodeQL, gitleaks, dependency review, Scorecard, ARI-42 gate), at
@@ -34,6 +42,13 @@ customers.
   gate, gitleaks and the sign-off check.
 
 ### AI changes
+- Provider `chatgpt-sub`: the ChatGPT subscription through Sign in with ChatGPT. sapi itself (no
+  child process) calls `https://api.openai.com/v1/responses` with `store: false`, and
+  `auth.openai.com` for sign-in, refresh, signing keys and revocation, through a second egress
+  proxy that allows only those two hosts. Models are the ones the plan lists, pinned per alias.
+  The user's ChatGPT tokens are kept in the secret store.
+- Two new entry points, `/v1/responses` and `/v1/messages`, reach the same providers; neither adds
+  tools or new hosts.
 - `sapi setup` can install the `claude` CLI (the tested version, 2.1.332) with Anthropic's official
   installer, after the user says yes. The installer runs outside sapi's sandbox, as installing it
   by hand would, with sapi's profile as its config folder.

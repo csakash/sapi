@@ -9,7 +9,7 @@
 import type { Client } from "../auth.ts";
 import type { Config } from "../config.ts";
 
-export const TOOLS = ["env", "curl", "python", "node", "langchain", "vercel-ai"] as const;
+export const TOOLS = ["env", "curl", "python", "node", "langchain", "vercel-ai", "anthropic"] as const;
 export type Tool = (typeof TOOLS)[number];
 
 /** The model a snippet should use: one the client may call, preferring the cheapest default. */
@@ -53,9 +53,16 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 
 const sapi = createOpenAI({ baseURL: process.env.OPENAI_BASE_URL, apiKey: process.env.OPENAI_API_KEY });
-// .chat() uses Chat Completions, which is what sapi serves today.
+// .chat() uses Chat Completions; sapi(...) alone uses the Responses API, which sapi serves too.
 const { text } = await generateText({ model: sapi.chat(${m}), prompt: "Hello" });
 console.log(text);`,
+    anthropic: `# pip install anthropic   (sapi serves the Messages API at /v1/messages)
+import os
+from anthropic import Anthropic
+
+client = Anthropic(base_url=os.environ["OPENAI_BASE_URL"].removesuffix("/v1"), api_key=os.environ["OPENAI_API_KEY"])
+r = client.messages.create(model=${m}, max_tokens=1024, messages=[{"role": "user", "content": "Hello"}])
+print(r.content[0].text)`,
   };
 }
 
@@ -66,6 +73,7 @@ const TITLES: Record<Tool, string> = {
   node: "OpenAI Node",
   langchain: "LangChain (Python)",
   "vercel-ai": "Vercel AI SDK",
+  anthropic: "Anthropic Python (Messages API)",
 };
 
 export function formatConnect(o: {
@@ -84,6 +92,5 @@ export function formatConnect(o: {
       : `Setup for "${o.client}". Lost its key? Issue a new one with: sapi connect ${o.client} --new-key`) +
     (o.disabled ? `\nThis client is disabled; turn it back on with: sapi clients enable ${o.client}` : "");
   const body = tools.map((t) => `## ${TITLES[t]}\n\n${all[t]}`).join("\n\n");
-  const tail = "Anthropic SDK (/v1/messages) and OpenAI Responses (/v1/responses) arrive in a later version.";
-  return `${head}\n\n${body}\n\n${o.only ? "" : tail}`.trimEnd();
+  return `${head}\n\n${body}`.trimEnd();
 }

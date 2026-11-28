@@ -14,6 +14,8 @@ afterAll(() => gw.cleanup());
 const API_ROUTES: Array<[string, string]> = [
   ["GET", "/v1/models"],
   ["POST", "/v1/chat/completions"],
+  ["POST", "/v1/responses"],
+  ["POST", "/v1/messages"],
 ];
 
 test("every API route needs a client key", async () => {
@@ -22,11 +24,29 @@ test("every API route needs a client key", async () => {
       method,
       headers: { "content-type": "application/json" },
       ...(method === "POST"
-        ? { body: JSON.stringify({ model: "echo", messages: [{ role: "user", content: "x" }] }) }
+        ? { body: JSON.stringify({ model: "echo", input: "x", messages: [{ role: "user", content: "x" }] }) }
         : {}),
     });
     expect({ method, path, status: r.status }).toEqual({ method, path, status: 401 });
   }
+});
+
+test("each door answers a missing key in its own format", async () => {
+  const send = (path: string, headers: Record<string, string> = {}) =>
+    gw.post(path, { model: "echo", input: "x", messages: [{ role: "user", content: "x" }] }, headers);
+  const anthropic = await jsonOf(
+    await send("/v1/messages", { "x-api-key": "not-a-key", "anthropic-version": "2023-06-01" }),
+  );
+  expect(anthropic).toEqual({
+    type: "error",
+    error: { type: "authentication_error", message: expect.any(String), sapi_error_kind: "unauthorized" },
+  });
+  const openai = await jsonOf(await send("/v1/responses"));
+  expect(openai.error).toMatchObject({
+    type: "authentication_error",
+    code: "unauthorized",
+    sapi_error_kind: "unauthorized",
+  });
 });
 
 test("the admin surface is refused without the admin session", async () => {

@@ -67,8 +67,8 @@ proxy. A kill switch ended a live Claude stream in 0.4 s. Numbers are in
 
 - **A token refresh under the sandbox.** The keychain folder is writable for this, but no refresh
   happened during the run. Watch for a "not signed in" after the first few hours of use.
-- **Linux.** bwrap and the systemd fallback have only been unit-checked. CI installs bubblewrap and
-  fails if the confinement suite would skip; the VM run of `scripts/phase0/linux-check.sh` is still
+- **Linux.** bwrap and the systemd fallback have only been unit-checked. `bun run ci` fails if the
+  confinement suite would skip (there is no hosted CI since Phase 2); the VM run of `scripts/phase0/linux-check.sh` is still
   pending.
 - **Python contract tests** run where `openai` and `langchain_openai` are installed (they ran here);
-  CI doesn't install them yet.
+  `bun run ci` runs them wherever they are installed.

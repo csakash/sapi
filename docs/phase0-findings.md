@@ -187,4 +187,5 @@ From OpenAI's developer docs (`developers.openai.com/siwc/…`); not exercised w
 - Try the headless `claude` login and a `setup-token` token on the VM.
 - Exercise Sign in with ChatGPT with a real account (desktop and SSH-forwarded).
 - GitHub name and trademark check; fill in maintainer handles.
-- Push to GitHub and confirm CI is green there (everything passes locally).
+- ~~Push to GitHub and confirm CI is green there.~~ Superseded: sapi has no hosted CI;
+  `bun run ci` is the gate (Phase 2).

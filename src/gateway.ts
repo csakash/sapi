@@ -19,7 +19,8 @@ import {
 } from "./canonical.ts";
 import type { Config, ModelTarget, ProviderId } from "./config.ts";
 import { type Db, recordEvent } from "./db.ts";
-import { ChatStreamWriter, completionJson, openAiError, parseChatRequest, SSE_PING, sse } from "./doors/chat.ts";
+import { SSE_PING } from "./doors/common.ts";
+import type { Door, DoorMeta, ParsedRequest } from "./doors/types.ts";
 import { InFlightRegistry, matchingSwitch, pausedError, pausedSwitches, type SwitchTarget } from "./killswitch.ts";
 import { type RequestRecord, recordLimit, recordRequest } from "./meter.ts";
 import { TEMPLATE_VERSION } from "./prompts/transcript-v1.ts";
@@ -48,7 +49,8 @@ export class Gateway {
   constructor(private readonly o: GatewayOptions) {
     const { cfg } = o;
     for (const [id] of o.adapters) {
-      const cap = id === "claude-sub" ? cfg.claude.max_concurrency : 8;
+      const cap =
+        id === "claude-sub" ? cfg.claude.max_concurrency : id === "chatgpt-sub" ? cfg.chatgpt.max_concurrency : 8;
       this.schedulers.set(id, new Scheduler(cap, cfg.clients.max_queue_per_provider));
     }
     this.refreshSwitches();
@@ -150,7 +152,14 @@ export class Gateway {
     return json({ object: "list", data });
   }
 
-  async chat(req: Request, readBody: () => Promise<unknown>): Promise<Response> {
+  /** First-token and total timeouts for a provider, in seconds. */
+  private timeouts(provider: string): { firstToken: number; total: number } {
+    const c = provider === "chatgpt-sub" ? this.o.cfg.chatgpt : this.o.cfg.claude;
+    return { firstToken: c.first_token_timeout_s, total: c.total_timeout_s };
+  }
+
+  /** One request through one door: the same pipeline whatever the API format. */
+  async handle(door: Door, req: Request, readBody: () => Promise<unknown>): Promise<Response> {
     const receivedAt = Date.now();
     const t0 = performance.now();
     const id = newId("req");
@@ -159,7 +168,7 @@ export class Gateway {
       id,
       clientId: client.id,
       receivedAt,
-      door: "chat",
+      door: door.name,
       status: "rejected",
       httpStatus: 0,
       headers: req.headers,
@@ -175,12 +184,12 @@ export class Gateway {
     // 1. Everything that can refuse the request, before any provider work.
     let canonical: CanonicalRequest;
     let adapter: ProviderAdapter;
-    let includeUsage: boolean;
+    let parsed: ParsedRequest;
     try {
       const s = matchingSwitch(this.switches, client.id);
       if (s) throw pausedError(s);
       this.rate.take(client.id, client.budget.rpm ?? this.o.cfg.clients.default_rpm);
-      const parsed = parseChatRequest(await readBody(), this.o.cfg.strict_params);
+      parsed = door.parse(await readBody(), this.o.cfg.strict_params);
       meter.stream = parsed.stream;
       meter.ignoredParams = parsed.ignoredParams;
       const target = this.route(parsed.alias, client);
@@ -194,11 +203,10 @@ export class Gateway {
       checkBudget(this.o.db, client, this.inflight.countForClient(client.id), {
         maxConcurrency: this.o.cfg.clients.default_max_concurrency,
       });
-      includeUsage = parsed.includeUsage;
       canonical = {
         id,
         clientId: client.id,
-        door: "chat",
+        door: door.name,
         alias: target.alias,
         provider: target.provider,
         model: target.model,
@@ -223,10 +231,10 @@ export class Gateway {
     const onClientGone = () => abort(new GatewayError("client_closed", "The client closed the connection."));
     req.signal.addEventListener("abort", onClientGone, { once: true });
 
-    const cfgClaude = this.o.cfg.claude;
+    const limits = this.timeouts(canonical.provider);
     const totalTimer = setTimeout(
-      () => abort(new GatewayError("timeout", `No complete answer within ${cfgClaude.total_timeout_s} s.`)),
-      cfgClaude.total_timeout_s * 1000,
+      () => abort(new GatewayError("timeout", `No complete answer within ${limits.total} s.`)),
+      limits.total * 1000,
     );
     let firstTokenTimer: ReturnType<typeof setTimeout> | undefined;
     let release: (() => void) | undefined;
@@ -288,14 +296,12 @@ export class Gateway {
     const buffered: CanonicalEvent[] = [];
     try {
       const qStart = performance.now();
-      release = await this.schedulers
-        .get(canonical.provider)!
-        .acquire(client.id, ac.signal, cfgClaude.first_token_timeout_s * 1000);
+      release = await this.schedulers.get(canonical.provider)!.acquire(client.id, ac.signal, limits.firstToken * 1000);
       queueMs = performance.now() - qStart;
       runStart = performance.now();
       firstTokenTimer = setTimeout(
-        () => abort(new GatewayError("timeout", `No first token within ${cfgClaude.first_token_timeout_s} s.`)),
-        cfgClaude.first_token_timeout_s * 1000,
+        () => abort(new GatewayError("timeout", `No first token within ${limits.firstToken} s.`)),
+        limits.firstToken * 1000,
       );
       iterator = adapter.send(canonical, ac.signal)[Symbol.asyncIterator]();
       // Hold the response until the first text (or the end), so early failures such as "not
@@ -314,7 +320,7 @@ export class Gateway {
       throw ge;
     }
 
-    const meta = { id: `chatcmpl-${id.slice(4)}`, created: Math.floor(receivedAt / 1000), model: providerModel };
+    const meta: DoorMeta = { requestId: id, created: Math.floor(receivedAt / 1000), model: providerModel };
     const headers: Record<string, string> = { "x-sapi-request-id": id };
     if (canonical.ignoredParams.length) headers["x-sapi-ignored-params"] = canonical.ignoredParams.join(",");
 
@@ -336,11 +342,11 @@ export class Gateway {
       }
       cleanup();
       meterDone();
-      return json(completionJson({ ...meta, model: providerModel }, text, finish, usage), 200, headers);
+      return json(door.complete({ ...meta, model: providerModel }, text, finish, usage), 200, headers);
     }
 
     // Streaming.
-    const writer = new ChatStreamWriter(meta, includeUsage);
+    const writer = door.stream(meta, parsed);
     let finished = false;
     let ping: ReturnType<typeof setInterval> | undefined;
     const end = (err?: GatewayError) => {
@@ -383,7 +389,7 @@ export class Gateway {
             ac.signal.aborted && ac.signal.reason instanceof GatewayError ? ac.signal.reason : asGatewayError(e);
           end(ge);
           try {
-            controller.enqueue(sse(openAiError(ge)));
+            for (const f of writer.error(ge)) controller.enqueue(f);
             controller.close();
           } catch {
             // client already gone

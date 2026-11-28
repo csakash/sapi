@@ -14,7 +14,7 @@ import { assertNotWritableByOthers } from "./paths.ts";
 export const ALIAS_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 /** Provider model IDs: lowercase letters, digits, dots and dashes; never starts with a dash. */
 export const MODEL_ID_RE = /^[a-z0-9][a-z0-9.-]{1,99}$/;
-export const PROVIDERS = ["claude-sub", "fake"] as const;
+export const PROVIDERS = ["claude-sub", "chatgpt-sub", "fake"] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
 const ModelEntry = z
@@ -84,6 +84,22 @@ export const ConfigSchema = z
         total_timeout_s: 600,
         memory_max_mb: 2048,
       }),
+    chatgpt: z
+      .object({
+        max_concurrency: z.number().int().min(1).max(16).default(4),
+        first_token_timeout_s: z.number().int().min(5).max(600).default(60),
+        total_timeout_s: z.number().int().min(10).max(3600).default(600),
+      })
+      .strict()
+      .default({ max_concurrency: 4, first_token_timeout_s: 60, total_timeout_s: 600 }),
+    /**
+     * Where provider sign-ins (ChatGPT tokens, later API keys) are kept. "auto" picks the OS store
+     * (Keychain or Secret Service), then systemd-creds, then a 0600 file, and remembers the choice.
+     */
+    secrets: z
+      .object({ backend: z.enum(["auto", "os", "systemd-creds", "file"]).default("auto") })
+      .strict()
+      .default({ backend: "auto" }),
     models: z.record(
       z.string().regex(ALIAS_RE, "aliases are short lowercase names"),
       z.union([ModelEntry, RouteEntry]),

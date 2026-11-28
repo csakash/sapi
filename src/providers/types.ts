@@ -6,7 +6,7 @@
 import type { CanonicalEvent, CanonicalRequest, LimitWindow } from "../canonical.ts";
 
 export type ProviderManifest = {
-  id: "claude-sub" | "fake";
+  id: "claude-sub" | "chatgpt-sub" | "fake";
   kind: "subscription-cli" | "subscription-oauth" | "api-key" | "local";
   displayName: string;
   /** The only hosts this provider may reach, port 443, through the egress proxy. */
