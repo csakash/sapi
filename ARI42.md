@@ -110,7 +110,7 @@ Status: **Met** (enforced + passing check) · **Partial** · **Gap** · **Risk**
 | EVAL-3 | Version prompts and config as code | Met | `src/prompts/transcript-v1.ts` is versioned; the version is logged on every request (`test/security/kill-switch.test.ts`) |
 | SDLC-1 | Approve coding assistants | Human | Policy drafted in `CONTRIBUTING.md` (AI-assisted contributions); the maintainer signs |
 | SDLC-2 | Sandbox coding agents | Partial | Dev container `.devcontainer/devcontainer.json`; `test/unit/repo-policy.test.ts` fails on bypass flags in `src/` and `scripts/`; no managed policy for contributors' own machines |
-| SDLC-3 | Review AI-written code | Partial | `scripts/ci.ts` runs Biome, tsc, the ARI-42 scan and gitleaks before a push; a person merges every PR, never an agent (one exception, approved by the owner: PR #1, see Exceptions). Missing: CodeQL, dependency review and required status checks, which ran as GitHub Actions (see Exceptions) |
+| SDLC-3 | Review AI-written code | Partial | `scripts/ci.ts` runs Biome, tsc, the ARI-42 scan and gitleaks before a push; a person merges every PR, never an agent (two exceptions, approved by the owner: PRs #1 and #2, see Exceptions). Missing: CodeQL, dependency review and required status checks, which ran as GitHub Actions (see Exceptions) |
 | SDLC-4 | Protect agent configuration | Partial | sapi's Claude profile is separate from the user's, and the child can't read or write sapi's config or database (`test/security/confinement.test.ts`); policy changes only through the CLI, never over HTTP (`test/security/auth-everywhere.test.ts`); the child can't write a launchd agent or systemd unit (`test/security/confinement.test.ts`); CODEOWNERS covers the installer, service and sandbox code. Missing: a real handle in `.github/CODEOWNERS` |
 | SDLC-5 | Isolate CI agents | Met | There is no hosted CI, so no AI step runs in it. `test/unit/repo-policy.test.ts` proves the workflow policy on a safe and an unsafe sample and applies it to any workflow that is added: read-only token by default, no `pull_request_target` or `issue_comment` trigger, SHA-pinned actions, no persisted credentials, no agent steps |
 | SDLC-6 | Block hallucinated packages | Met | `test/unit/repo-policy.test.ts` checks exact versions, an integrity hash for every locked package, and Renovate's 7-day minimum release age; `bun run ci` installs with `--frozen-lockfile`. Phase 1's two new packages (`zod` 4.6.7, `openai` 7.61.0) and Phase 3's `@anthropic-ai/sdk` 1.12.0 (dev only; the official anthropics/anthropic-sdk-typescript package, on npm since 2023, release 8 days old) were checked on npm: intended package, years old, release older than 7 days |
@@ -122,6 +122,7 @@ Status: **Met** (enforced + passing check) · **Partial** · **Gap** · **Risk**
 | EVAL-1 | Security evals run only when someone runs `bun run ci`; no hosted CI gates pushes or pull requests, and nothing runs on Linux or ARM automatically | The owner asked for no GitHub Actions (the account's Actions were locked over billing); `bun run ci` runs the same checks locally | csakash (repository owner), 2026-11-27 | 2027-02-27 |
 | SDLC-3 | No CodeQL, dependency review or OpenSSF Scorecard, and no required status checks | Same decision: these ran as GitHub Actions | csakash (repository owner), 2026-11-27 | 2027-02-27 |
 | SDLC-3 | PR #1 (Phase 2 setup and the removal of GitHub Actions) was merged by the coding agent, not by a person | The owner told the agent in chat to merge it after being shown the rule. A one-off: the rule in `CONTRIBUTING.md` (agents never merge) stands | csakash (repository owner), 2026-11-28 | 2027-02-27 |
+| SDLC-3 | PR #2 (Phase 3: ChatGPT, the secret store, the Responses and Messages doors) was merged by the coding agent, not by a person | The owner told the agent in chat to merge it after being shown the rule again. The second agent merge: the rule in `CONTRIBUTING.md` stands, and the review should decide whether to keep it or change it | csakash (repository owner), 2026-11-28 | 2027-02-27 |
 
 ## Notes on scanner findings
 
@@ -137,13 +138,14 @@ neither this scanner nor gitleaks mistakes test inputs for leaks.
 - [ ] SDLC-4: replace the placeholder handle in `.github/CODEOWNERS`, and the same placeholder in `REPO` at the top of `scripts/install.sh` (the installer refuses to guess a download source until then).
 - [ ] AUTH-3: sign the N/A as an exception. The scanner now detects a vendor SDK (`openai`, used only by the contract tests).
 - [ ] INJ-1: review the trust-boundary table and date it.
-- [ ] EVAL-1 and SDLC-3: review the no-hosted-CI exceptions and the agent-merged PR #1 by 2027-02-27.
+- [ ] EVAL-1 and SDLC-3: review the no-hosted-CI exceptions and the agent-merged PRs #1 and #2 by 2027-02-27; two agent merges in a row means deciding whether the rule still holds.
 - [ ] LOG-3 and EVAL-2: own the incident runbooks and the independent review (later phases).
 
 ## Change log
 
 | Date | Change | Requirements touched | Status after |
 |---|---|---|---|
+| 2026-11-28 | PR #2 merged by the coding agent at the owner's request in chat, the second recorded exception to "agents never merge" | SDLC-3 | unchanged: 14 of 34 met; SDLC-3 stays Partial |
 | 2026-11-28 | Phase 3: ChatGPT subscription through Sign in with ChatGPT (desktop, SSH tunnel, export and import, refresh, sign-out with revocation), the secret store (Keychain or Secret Service, systemd-creds, 0600 file), sapi's own egress path for OpenAI, `/v1/responses` and `/v1/messages`, `auto` routing across providers. Real sign-in, refresh and 8 calls through all three doors passed on the owner's plan (`scripts/e2e/real-chatgpt.ts`) | DATA-1, DATA-3, AUTH-2, INJ-1, INJ-4, OUT-1, MCP-3, GW-1, GW-2, GW-3, LOG-1, GOV-1, SDLC-6 | unchanged: 14 of 34 met; DATA-3 is down to log retention |
 | 2026-11-27 | Phase 0: repository skeleton, CI, Claude CLI probes and fixtures, ARI-42 installed | GOV-1, GOV-4, INJ-2, INJ-4, OUT-4, MCP-1, GW-1, GW-2, SDLC-2–6 | 2 of 34 met |
 | 2026-11-27 | Phase 2: `sapi setup` (guided and `--yes`), `doctor`, `connect`, launchd and systemd user service, `start`/`stop`, `uninstall [--purge]`, `scripts/install.sh` with checksum and optional signature check, Claude CLI install through Anthropic's installer, `docs/vm-setup.md` | DATA-3, AUTH-1, OUT-4, MCP-3, GW-1, GW-2, LOG-1, EVAL-1, SDLC-4 | 14 of 34 met; DATA-3 Gap → Partial |
